@@ -67,6 +67,7 @@ const KMEANS_TYPE: &'static str = r#"
 export function kmeans(
   k: number,
   max_iter: number,
+  convergence_threshold: number,
   data: Array<Array<number>>,
 ): Array<Array<number>>;
 "#;
