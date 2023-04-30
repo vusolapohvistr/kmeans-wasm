@@ -16,7 +16,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     // precision and counteract the resulting noise.
     group.significance_level(0.1).sample_size(1000);
     group.bench_function("10^3 random pixels, 3 centroids, kmeans_rgb", |b| {
-        b.iter(|| kmeans_rgb(3, 1000, black_box(get_pixels())))
+        b.iter(|| kmeans_rgb(3, 1000, 0.1, black_box(get_pixels())))
     });
     group.finish();
 }

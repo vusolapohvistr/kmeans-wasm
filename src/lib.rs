@@ -9,12 +9,18 @@ use wasm_bindgen::{prelude::*, JsCast};
 ///
 /// - `k >= 2` - number of clusters (colors).
 /// - `max_iter` - maximum number of iterations.
+/// - `convergence_threshold` - the threshold to determine when the centroids have converged.
 /// - `rgb_slice` - Uint8Array of RGB components, where each component is a u8 value.
 ///
 /// This function is suitable for color quantization in image processing, where the goal is to
 /// reduce the number of distinct colors in an image while preserving its overall appearance.
 /// The resulting centroids represent the quantized colors.
-pub fn kmeans_rgb(k: usize, max_iter: usize, rgb_slice: Vec<u8>) -> Result<Vec<u8>, JsValue> {
+pub fn kmeans_rgb(
+    k: usize,
+    max_iter: usize,
+    convergence_threshold: f64,
+    rgb_slice: Vec<u8>,
+) -> Result<Vec<u8>, JsValue> {
     if k < 2 {
         return Err(JsValue::from_str(
             "Error: k must be greater than or equal to 2.",
@@ -30,6 +36,7 @@ pub fn kmeans_rgb(k: usize, max_iter: usize, rgb_slice: Vec<u8>) -> Result<Vec<u
     let centroids = kmeans_triangle::hamerly_kmeans(
         k,
         max_iter,
+        convergence_threshold,
         rgb_slice
             .chunks_exact(3)
             .map(|x| vec![x[0] as f64, x[1] as f64, x[2] as f64])
@@ -49,9 +56,11 @@ const KMEANS_TYPE: &'static str = r#"
 *
 * - `k >= 2` - number of clusters.
 * - `max_iter` - maximum number of iterations.
+* - `convergence_threshold` - the threshold to determine when the centroids have converged.
 * - `data` - array of arrays of f64 values, where each inner array represents a point in the vector-space.
 * @param {number} k
 * @param {number} max_iter
+* @param {number} convergence_threshold
 * @param {Array<Array<number>>} data
 * @returns {Array<Array<number>>}
 */
@@ -67,8 +76,14 @@ export function kmeans(
 ///
 /// - `k >= 2` - number of clusters.
 /// - `max_iter` - maximum number of iterations.
+/// - `convergence_threshold` - the threshold to determine when the centroids have converged.
 /// - `data` - array of arrays of f64 values, where each inner array represents a point in the vector-space.
-pub fn kmeans(k: usize, max_iter: usize, data: Array) -> Result<Array, JsValue> {
+pub fn kmeans(
+    k: usize,
+    max_iter: usize,
+    convergence_threshold: f64,
+    data: Array,
+) -> Result<Array, JsValue> {
     if k < 2 {
         return Err(JsValue::from_str(
             "Error: k must be greater than or equal to 2.",
@@ -96,7 +111,12 @@ pub fn kmeans(k: usize, max_iter: usize, data: Array) -> Result<Array, JsValue> 
         }
     }
 
-    let centroids = kmeans_triangle::hamerly_kmeans(k, max_iter, data_vec);
+    let centroids = kmeans_triangle::hamerly_kmeans(
+        k,
+        max_iter,
+        convergence_threshold,
+        data_vec,
+    );
 
     let centroids_array = Array::new();
     for centroid in centroids {

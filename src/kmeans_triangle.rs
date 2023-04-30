@@ -1,7 +1,12 @@
 use rand::prelude::{SliceRandom, StdRng};
 use rand::SeedableRng;
 
-pub fn hamerly_kmeans(k: usize, max_iter: usize, points: Vec<Vec<f64>>) -> Vec<Vec<f64>> {
+pub fn hamerly_kmeans(
+    k: usize,
+    max_iter: usize,
+    convergence_threshold: f64,
+    points: Vec<Vec<f64>>,
+) -> Vec<Vec<f64>> {
     if points.is_empty() {
         return vec![];
     }
@@ -18,7 +23,11 @@ pub fn hamerly_kmeans(k: usize, max_iter: usize, points: Vec<Vec<f64>>) -> Vec<V
 
     let mut centroid_closest_centroid_distance = vec![f64::MAX; centroids.len()];
     let mut centroid_distance_to_previous_position = vec![f64::MAX; centroids.len()];
-    for _ in 0..max_iter {
+    let mut iteration = 0;
+
+    while iteration < max_iter {
+        let mut total_squared_distance_moved = 0.0;
+
         for j in 0..centroids.len() {
             centroid_closest_centroid_distance[j] = get_min_centroid(
                 &centroids[j],
@@ -60,7 +69,7 @@ pub fn hamerly_kmeans(k: usize, max_iter: usize, points: Vec<Vec<f64>>) -> Vec<V
             }
         }
 
-        move_centers(
+        total_squared_distance_moved = move_centers(
             &centroid_points_sum,
             &centroid_points_counts,
             &mut centroids,
@@ -72,6 +81,12 @@ pub fn hamerly_kmeans(k: usize, max_iter: usize, points: Vec<Vec<f64>>) -> Vec<V
             &mut upper_bounds,
             &mut lower_bounds,
         );
+
+        if total_squared_distance_moved < convergence_threshold {
+            break;
+        }
+
+        iteration += 1;
     }
 
     centroids
@@ -106,21 +121,25 @@ fn update_bounds(
         }
     }
 }
+
 fn move_centers(
-    centroid_points_sum: &[Vec<f64>],
-    centroid_points_counts: &[usize],
-    centroids: &mut [Vec<f64>],
-    centroid_distance_to_previous_position: &mut [f64],
-) {
+    centroid_points_sum: &Vec<Vec<f64>>,
+    centroid_points_counts: &Vec<usize>,
+    centroids: &mut Vec<Vec<f64>>,
+    centroid_distance_to_previous_position: &mut Vec<f64>,
+) -> f64 {
+    let mut total_squared_distance_moved = 0.0;
     for j in 0..centroids.len() {
-        let mut distance = 0.0;
+        let mut squared_distance_moved = 0.0;
         for i in 0..centroids[j].len() {
-            let new_value = centroid_points_sum[j][i] / centroid_points_counts[j] as f64;
-            distance += (new_value - centroids[j][i]).powi(2);
-            centroids[j][i] = new_value;
+            let previous_position = centroids[j][i];
+            centroids[j][i] = centroid_points_sum[j][i] / centroid_points_counts[j] as f64;
+            squared_distance_moved += (previous_position - centroids[j][i]).powi(2);
         }
-        centroid_distance_to_previous_position[j] = distance.sqrt();
+        centroid_distance_to_previous_position[j] = squared_distance_moved.sqrt();
+        total_squared_distance_moved += squared_distance_moved;
     }
+    total_squared_distance_moved
 }
 
 fn get_centroids(points: &[Vec<f64>], k: usize) -> Vec<Vec<f64>> {
