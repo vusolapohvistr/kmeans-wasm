@@ -4,10 +4,10 @@ A WebAssembly implementation of the k-means clustering algorithm for color quant
 
 ## Features
 
-Fast k-means clustering using the Hamerly algorithm
-Can be used for color quantization in image processing
-Works with any vector-space
-Exports both JavaScript and TypeScript bindings
+Fast k-means clustering using the Hamerly algorithm   
+Can be used for color quantization in image processing  
+Works with any vector-space  
+Exports both JavaScript and TypeScript bindings  
 ## Installation
 
  npm install kmeans-wasm 
