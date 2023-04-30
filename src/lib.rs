@@ -112,12 +112,7 @@ pub fn kmeans(
         }
     }
 
-    let centroids = kmeans_triangle::hamerly_kmeans(
-        k,
-        max_iter,
-        convergence_threshold,
-        data_vec,
-    );
+    let centroids = kmeans_triangle::hamerly_kmeans(k, max_iter, convergence_threshold, data_vec);
 
     let centroids_array = Array::new();
     for centroid in centroids {
