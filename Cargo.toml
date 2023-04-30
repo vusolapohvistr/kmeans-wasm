@@ -1,8 +1,10 @@
 [package]
 name = "kmeans-wasm"
-version = "1.1.1"
+version = "1.1.2"
 authors = ["Serhii Pylypchuk <sergiydjan@gmail.com>"]
 edition = "2018"
+repository = "https://github.com/ycatbink0t/kmeans-wasm"
+homepage = "https://github.com/ycatbink0t/kmeans-wasm"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
