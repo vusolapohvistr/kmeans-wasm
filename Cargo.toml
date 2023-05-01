@@ -1,6 +1,6 @@
 [package]
 name = "kmeans-wasm"
-version = "1.1.5"
+version = "1.1.6"
 authors = ["Serhii Pylypchuk <sergiydjan@gmail.com>"]
 edition = "2018"
 repository = "https://github.com/ycatbink0t/kmeans-wasm"
