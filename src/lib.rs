@@ -1,5 +1,4 @@
 mod kmeans_triangle;
-mod utils;
 
 use js_sys::Array;
 use wasm_bindgen::{prelude::*, JsCast};
