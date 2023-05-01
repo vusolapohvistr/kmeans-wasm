@@ -26,8 +26,6 @@ pub fn hamerly_kmeans(
     let mut iteration = 0;
 
     while iteration < max_iter {
-        let mut total_squared_distance_moved = 0.0;
-
         for j in 0..centroids.len() {
             centroid_closest_centroid_distance[j] = get_min_centroid(
                 &centroids[j],
@@ -69,7 +67,7 @@ pub fn hamerly_kmeans(
             }
         }
 
-        total_squared_distance_moved = move_centers(
+        let total_squared_distance_moved = move_centers(
             &centroid_points_sum,
             &centroid_points_counts,
             &mut centroids,
@@ -123,10 +121,10 @@ fn update_bounds(
 }
 
 fn move_centers(
-    centroid_points_sum: &Vec<Vec<f64>>,
-    centroid_points_counts: &Vec<usize>,
+    centroid_points_sum: &[Vec<f64>],
+    centroid_points_counts: &[usize],
     centroids: &mut Vec<Vec<f64>>,
-    centroid_distance_to_previous_position: &mut Vec<f64>,
+    centroid_distance_to_previous_position: &mut [f64],
 ) -> f64 {
     let mut total_squared_distance_moved = 0.0;
     for j in 0..centroids.len() {
