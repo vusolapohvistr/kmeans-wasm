@@ -1,6 +1,6 @@
 mod kmeans_triangle;
 
-use js_sys::Array;
+use js_sys::{Array};
 use wasm_bindgen::{prelude::*, JsCast};
 
 #[wasm_bindgen]

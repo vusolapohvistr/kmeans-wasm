@@ -1,6 +1,3 @@
-use rand::prelude::{SliceRandom, StdRng};
-use rand::SeedableRng;
-
 pub fn hamerly_kmeans(
     k: usize,
     max_iter: usize,
@@ -38,30 +35,36 @@ pub fn hamerly_kmeans(
             .1;
         }
 
-        for i in 0..points.len() {
+        for (((point, point_centroid), lower_bound), upper_bound) in points
+            .iter()
+            .zip(point_centroids.iter_mut())
+            .zip(lower_bounds.iter_mut())
+            .zip(upper_bounds.iter_mut())
+        {
             let m = f64::max(
-                centroid_closest_centroid_distance[point_centroids[i]] / 2.0,
-                lower_bounds[i],
+                centroid_closest_centroid_distance[*point_centroid] / 2.0,
+                *lower_bound,
             );
-            if upper_bounds[i] > m {
-                upper_bounds[i] = get_distance(&points[i], &centroids[point_centroids[i]]);
-                if upper_bounds[i] > m {
-                    let previous_point_centroid = point_centroids[i];
-                    point_all_centers(
-                        i,
-                        &points,
-                        &centroids,
-                        &mut upper_bounds,
-                        &mut lower_bounds,
-                        &mut point_centroids,
-                    );
-                    if previous_point_centroid != point_centroids[i] {
+            if *upper_bound > m {
+                *upper_bound = get_distance(point, &centroids[*point_centroid]);
+                if *upper_bound > m {
+                    let previous_point_centroid = *point_centroid;
+                    point_all_centers(point, &centroids, upper_bound, lower_bound, point_centroid);
+                    if previous_point_centroid != *point_centroid {
                         centroid_points_counts[previous_point_centroid] -= 1;
-                        for j in 0..points[i].len() {
-                            centroid_points_sum[previous_point_centroid][j] -= points[i][j];
-                            centroid_points_sum[point_centroids[i]][j] += points[i][j];
+                        for (point_part, previous_point_centroid_sum_part) in point
+                            .iter()
+                            .zip(centroid_points_sum[previous_point_centroid].iter_mut())
+                        {
+                            *previous_point_centroid_sum_part -= point_part;
                         }
-                        centroid_points_counts[point_centroids[i]] += 1;
+                        for (point_part, current_point_centroid_sum_part) in point
+                            .iter()
+                            .zip(centroid_points_sum[*point_centroid].iter_mut())
+                        {
+                            *current_point_centroid_sum_part += point_part;
+                        }
+                        centroid_points_counts[*point_centroid] += 1;
                     }
                 }
             }
@@ -110,12 +113,16 @@ fn update_bounds(
         .unwrap()
         .0;
 
-    for i in 0..upper_bounds.len() {
-        upper_bounds[i] += centroid_distance_to_previous_position[point_centroids[i]];
-        if r == point_centroids[i] {
-            lower_bounds[i] -= centroid_distance_to_previous_position[r_another];
+    for ((upper_bound, lower_bound), point_centroid) in upper_bounds
+        .iter_mut()
+        .zip(lower_bounds.iter_mut())
+        .zip(point_centroids.iter())
+    {
+        *upper_bound += centroid_distance_to_previous_position[*point_centroid];
+        if r == *point_centroid {
+            *lower_bound -= centroid_distance_to_previous_position[r_another];
         } else {
-            lower_bounds[i] -= centroid_distance_to_previous_position[r];
+            *lower_bound -= centroid_distance_to_previous_position[r];
         }
     }
 }
@@ -140,11 +147,6 @@ fn move_centers(
     total_squared_distance_moved
 }
 
-fn get_centroids(points: &[Vec<f64>], k: usize) -> Vec<Vec<f64>> {
-    let mut rng = StdRng::seed_from_u64(0);
-    points.choose_multiple(&mut rng, k).cloned().collect()
-}
-
 struct InitializeResult {
     centroid_points_counts: Vec<usize>, // q(j) – number of points assigned to cluster j
     centroid_points_sum: Vec<Vec<f64>>, // c`(j) vector sum of all points in cluster j
@@ -165,18 +167,16 @@ fn initialize(centroids: &[Vec<f64>], points: &[Vec<f64>]) -> InitializeResult {
 
     centroid_points_counts = vec![0; centroids.len()];
     centroid_points_sum = vec![vec![0.0; centroids[0].len()]; centroids.len()];
-    for i in 0..points.len() {
-        point_all_centers(
-            i,
-            points,
-            centroids,
-            &mut upper_bounds,
-            &mut lower_bounds,
-            &mut point_centroids,
-        );
-        centroid_points_counts[point_centroids[i]] += 1;
-        for j in 0..points[i].len() {
-            centroid_points_sum[point_centroids[i]][j] += points[i][j];
+    for (((point, point_centroid), lower_bound), upper_bound) in points
+        .iter()
+        .zip(point_centroids.iter_mut())
+        .zip(lower_bounds.iter_mut())
+        .zip(upper_bounds.iter_mut())
+    {
+        point_all_centers(point, centroids, upper_bound, lower_bound, point_centroid);
+        centroid_points_counts[*point_centroid] += 1;
+        for j in 0..point.len() {
+            centroid_points_sum[*point_centroid][j] += point[j];
         }
     }
 
@@ -189,27 +189,23 @@ fn initialize(centroids: &[Vec<f64>], points: &[Vec<f64>]) -> InitializeResult {
     }
 }
 
+#[inline]
 fn point_all_centers(
-    i: usize,
-    points: &[Vec<f64>],
+    point: &[f64],
     centroids: &[Vec<f64>],
-    upper_bounds: &mut [f64],
-    lower_bounds: &mut [f64],
-    point_centroids: &mut [usize],
+    upper_bound: &mut f64,
+    lower_bound: &mut f64,
+    point_centroid: &mut usize,
 ) {
-    let (point_centroid, upper_bound) = get_min_centroid(&points[i], centroids.iter());
-    let (_, lower_bound) = get_min_centroid(
-        &points[i],
+    (*point_centroid, *upper_bound) = get_min_centroid(point, centroids.iter());
+    (_, *lower_bound) = get_min_centroid(
+        point,
         centroids
             .iter()
             .enumerate()
-            .filter(|(i, _)| *i != point_centroid)
+            .filter(|(i, _)| *i != *point_centroid)
             .map(|(_, centroid)| centroid),
     );
-
-    upper_bounds[i] = upper_bound;
-    lower_bounds[i] = lower_bound;
-    point_centroids[i] = point_centroid;
 }
 
 fn get_min_centroid<'a>(
@@ -237,3 +233,35 @@ fn get_distance(a: &[f64], b: &[f64]) -> f64 {
         .sum::<f64>()
         .sqrt()
 }
+
+#[cfg(target_arch = "wasm32")]
+use js_sys::Math;
+#[cfg(not(target_arch = "wasm32"))]
+use rand::prelude::{SliceRandom, StdRng};
+#[cfg(not(target_arch = "wasm32"))]
+use rand::SeedableRng;
+
+fn get_centroids(points: &[Vec<f64>], k: usize) -> Vec<Vec<f64>> {
+    let mut centroids = Vec::with_capacity(k);
+
+    #[cfg(target_arch = "wasm32")]
+    {
+        let mut chosen_indices = Vec::with_capacity(k);
+        while centroids.len() < k {
+            let random_index = (Math::random() * (points.len() as f64)) as usize;
+            if !chosen_indices.contains(&random_index) {
+                centroids.push(points[random_index].clone());
+                chosen_indices.push(random_index);
+            }
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let mut rng = StdRng::seed_from_u64(0);
+        centroids = points.choose_multiple(&mut rng, k).cloned().collect();
+    }
+
+    centroids
+}
+
