@@ -1,11 +1,21 @@
+pub struct HamerlyKmeansResult {
+    pub centroids: Vec<Vec<f64>>,
+    pub iterations: usize,
+    pub point_centroids: Vec<usize>,
+}
+
 pub fn hamerly_kmeans(
     k: usize,
     max_iter: usize,
     convergence_threshold: f64,
     points: Vec<Vec<f64>>,
-) -> Vec<Vec<f64>> {
+) -> HamerlyKmeansResult {
     if points.is_empty() {
-        return vec![];
+        return HamerlyKmeansResult {
+            centroids: Vec::new(),
+            iterations: 0,
+            point_centroids: Vec::new(),
+        };
     }
 
     let mut centroids = get_centroids(&points, k);
@@ -20,9 +30,9 @@ pub fn hamerly_kmeans(
 
     let mut centroid_closest_centroid_distance = vec![f64::MAX; centroids.len()];
     let mut centroid_distance_to_previous_position = vec![f64::MAX; centroids.len()];
-    let mut iteration = 0;
+    let mut iterations = 0;
 
-    while iteration < max_iter {
+    while iterations < max_iter {
         for j in 0..centroids.len() {
             centroid_closest_centroid_distance[j] = get_min_centroid(
                 &centroids[j],
@@ -87,10 +97,14 @@ pub fn hamerly_kmeans(
             break;
         }
 
-        iteration += 1;
+        iterations += 1;
     }
 
-    centroids
+    HamerlyKmeansResult {
+        centroids,
+        iterations,
+        point_centroids,
+    }
 }
 
 fn update_bounds(

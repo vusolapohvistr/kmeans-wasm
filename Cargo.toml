@@ -1,6 +1,6 @@
 [package]
 name = "kmeans-wasm"
-version = "1.2.2"
+version = "2.0.0"
 authors = ["Serhii Pylypchuk <sergiydjan@gmail.com>"]
 edition = "2018"
 repository = "https://github.com/ycatbink0t/kmeans-wasm"
@@ -11,7 +11,7 @@ license = "MIT"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-wasm-bindgen = "0.2.63"
+wasm-bindgen = "0.2.84"
 js-sys = "0.3.61"
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 getrandom = { version = "*", features = ["js"] }
