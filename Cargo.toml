@@ -1,6 +1,6 @@
 [package]
 name = "kmeans-wasm"
-version = "2.0.3"
+version = "2.0.7"
 authors = ["Serhii Pylypchuk <sergiydjan@gmail.com>"]
 edition = "2018"
 repository = "https://github.com/ycatbink0t/kmeans-wasm"
@@ -24,6 +24,9 @@ criterion = "0.3"
 [profile.release]
 # Tell `rustc` to optimize for small code size.
 opt-level = 3
+lto = true
+panic = 'abort'
+strip = true
 
 [[bench]]
 name = "kmeans_rgb"

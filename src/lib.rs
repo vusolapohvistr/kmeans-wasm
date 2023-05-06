@@ -158,16 +158,16 @@ pub fn kmeans(
         centroids_array.push(&centroid_array);
     }
 
-    let idxs = Array::new_with_length(result.point_centroids.len() as u32);
-    for index in result.point_centroids.iter() {
-        idxs.push(&JsValue::from_f64(*index as f64));
+    let p_c = js_sys::Uint32Array::new_with_length(result.point_centroids.len() as u32);
+    for (i, point_index) in result.point_centroids.iter().enumerate() {
+        p_c.set_index(i as u32, *point_index as u32);
     }
 
     let result_js = Object::new();
     Reflect::set(&result_js, &JsValue::from_str("k"), &JsValue::from_f64(k as f64))?;
     Reflect::set(&result_js, &JsValue::from_str("it"), &JsValue::from_f64(result.iterations as f64))?;
     Reflect::set(&result_js, &JsValue::from_str("centroids"), &centroids_array)?;
-    Reflect::set(&result_js, &JsValue::from_str("idxs"), &idxs)?;
+    Reflect::set(&result_js, &JsValue::from_str("idxs"), &p_c)?;
     Reflect::set(&result_js, &JsValue::from_str("test"), &Function::new_with_args("point, fnDist", "
         if (point.length !== this.centroids.length) {
             throw new Error('Point should have the same length as centroid');
