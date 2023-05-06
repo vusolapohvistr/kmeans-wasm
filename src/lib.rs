@@ -1,6 +1,6 @@
 mod kmeans_triangle;
 
-use js_sys::{Array, Object, Function};
+use js_sys::{Array, Object, Function, Reflect};
 use wasm_bindgen::{prelude::*, JsCast};
 
 #[wasm_bindgen]
@@ -149,26 +149,26 @@ pub fn kmeans(
 
     let result = kmeans_triangle::hamerly_kmeans(k, max_iter, convergence_threshold, data_vec);
 
-    let centroids_array = Array::new();
+    let centroids_array = Array::new_with_length(result.centroids.len() as u32);
     for centroid in result.centroids.iter() {
-        let centroid_array = Array::new();
+        let centroid_array = Array::new_with_length(centroid.len() as u32);
         for value in centroid {
             centroid_array.push(&JsValue::from_f64(*value));
         }
         centroids_array.push(&centroid_array);
     }
 
-    let idxs = Array::new();
+    let idxs = Array::new_with_length(result.point_centroids.len() as u32);
     for index in result.point_centroids.iter() {
         idxs.push(&JsValue::from_f64(*index as f64));
     }
 
-    let result_js_entries = Array::new();
-    result_js_entries.push(&Array::of2(&JsValue::from_str("k"), &JsValue::from_f64(k as f64)));
-    result_js_entries.push(&Array::of2(&JsValue::from_str("it"), &JsValue::from_f64(result.iterations as f64)));
-    result_js_entries.push(&Array::of2(&JsValue::from_str("centroids"), &centroids_array));
-    result_js_entries.push(&Array::of2(&JsValue::from_str("idxs"), &idxs));
-    result_js_entries.push(&Array::of2(&JsValue::from_str("test"), &Function::new_with_args("point, fnDist", "
+    let result_js = Object::new();
+    Reflect::set(&result_js, &JsValue::from_str("k"), &JsValue::from_f64(k as f64))?;
+    Reflect::set(&result_js, &JsValue::from_str("it"), &JsValue::from_f64(result.iterations as f64))?;
+    Reflect::set(&result_js, &JsValue::from_str("centroids"), &centroids_array)?;
+    Reflect::set(&result_js, &JsValue::from_str("idxs"), &idxs)?;
+    Reflect::set(&result_js, &JsValue::from_str("test"), &Function::new_with_args("point, fnDist", "
         if (point.length !== this.centroids.length) {
             throw new Error('Point should have the same length as centroid');
         }
@@ -193,8 +193,7 @@ pub fn kmeans(
         }
 
         return minCentroid;
-    ")));
-    let result_js = Object::from_entries(&result_js_entries)?;
+    "))?;
 
     Ok(result_js)
 }
