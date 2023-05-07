@@ -1,0 +1,24 @@
+{
+  "name": "js_bench",
+  "version": "1.0.0",
+  "description": "Bench for wasm-kmeans",
+  "main": "build/index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "tsc && node build/index.js",
+    "build": "tsc",
+    "prebuild": "npm run generate-wasm",
+    "prestart": "npm run generate-wasm",
+    "generate-wasm": "cd .. && wasm-pack build --out-dir kmeans-wasm-node --target nodejs --profiling && cd js_bench && npm i ../kmeans-wasm-node"
+  },
+  "author": "Serhii Pylypchuk",
+  "license": "MIT",
+  "dependencies": {
+    "kmeans-wasm": "file:../kmeans-wasm-node",
+    "skmeans": "^0.11.3",
+    "typescript": "^5.0.4"
+  },
+  "devDependencies": {
+    "@types/skmeans": "^0.11.4"
+  }
+}

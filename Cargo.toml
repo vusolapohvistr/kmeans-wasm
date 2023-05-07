@@ -1,6 +1,6 @@
 [package]
 name = "kmeans-wasm"
-version = "2.0.7"
+version = "2.0.10"
 authors = ["Serhii Pylypchuk <sergiydjan@gmail.com>"]
 edition = "2018"
 repository = "https://github.com/ycatbink0t/kmeans-wasm"
@@ -22,11 +22,11 @@ wasm-bindgen-test = "0.3.13"
 criterion = "0.3"
 
 [profile.release]
-# Tell `rustc` to optimize for small code size.
 opt-level = 3
 lto = true
 panic = 'abort'
 strip = true
+codegen-units = 1
 
 [[bench]]
 name = "kmeans_rgb"

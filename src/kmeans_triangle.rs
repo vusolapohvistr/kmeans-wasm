@@ -33,14 +33,11 @@ pub fn hamerly_kmeans(
     let mut iterations = 0;
 
     while iterations < max_iter {
-        for j in 0..centroids.len() {
-            centroid_closest_centroid_distance[j] = get_min_centroid(
-                &centroids[j],
-                centroids
-                    .iter()
-                    .enumerate()
-                    .filter(|(i, _)| *i != j)
-                    .map(|(_, centroid)| centroid),
+        for (j, centroid) in centroids.iter().enumerate() {
+            centroid_closest_centroid_distance[j] = get_min_centroid_skip_point_centroid(
+                centroid,
+                &centroids,
+                j,
             )
             .1;
         }
@@ -144,18 +141,23 @@ fn update_bounds(
 fn move_centers(
     centroid_points_sum: &[Vec<f64>],
     centroid_points_counts: &[usize],
-    centroids: &mut Vec<Vec<f64>>,
+    centroids: &mut [Vec<f64>],
     centroid_distance_to_previous_position: &mut [f64],
 ) -> f64 {
     let mut total_squared_distance_moved = 0.0;
-    for j in 0..centroids.len() {
+    for (((centroid, points_sum), points_count), distance_to_previous_position) in centroids
+        .iter_mut()
+        .zip(centroid_points_sum.iter())
+        .zip(centroid_points_counts.iter())
+        .zip(centroid_distance_to_previous_position.iter_mut())
+    {
         let mut squared_distance_moved = 0.0;
-        for i in 0..centroids[j].len() {
-            let previous_position = centroids[j][i];
-            centroids[j][i] = centroid_points_sum[j][i] / centroid_points_counts[j] as f64;
-            squared_distance_moved += (previous_position - centroids[j][i]).powi(2);
+        for (centroid_part, points_sum_part) in centroid.iter_mut().zip(points_sum.iter()) {
+            let previous_position = *centroid_part;
+            *centroid_part = points_sum_part / *points_count as f64;
+            squared_distance_moved += (previous_position - *centroid_part).powi(2);
         }
-        centroid_distance_to_previous_position[j] = squared_distance_moved.sqrt();
+        *distance_to_previous_position = squared_distance_moved.sqrt();
         total_squared_distance_moved += squared_distance_moved;
     }
     total_squared_distance_moved
@@ -189,8 +191,11 @@ fn initialize(centroids: &[Vec<f64>], points: &[Vec<f64>]) -> InitializeResult {
     {
         point_all_centers(point, centroids, upper_bound, lower_bound, point_centroid);
         centroid_points_counts[*point_centroid] += 1;
-        for j in 0..point.len() {
-            centroid_points_sum[*point_centroid][j] += point[j];
+        for (point_centroid_sum_part, point_part) in centroid_points_sum[*point_centroid]
+            .iter_mut()
+            .zip(point.iter())
+        {
+            *point_centroid_sum_part += point_part;
         }
     }
 
@@ -211,33 +216,53 @@ fn point_all_centers(
     lower_bound: &mut f64,
     point_centroid: &mut usize,
 ) {
-    (*point_centroid, *upper_bound) = get_min_centroid(point, centroids.iter());
-    (_, *lower_bound) = get_min_centroid(
+    (*point_centroid, *upper_bound) = get_min_centroid(point, centroids);
+    (_, *lower_bound) = get_min_centroid_skip_point_centroid(
         point,
-        centroids
-            .iter()
-            .enumerate()
-            .filter(|(i, _)| *i != *point_centroid)
-            .map(|(_, centroid)| centroid),
+        centroids,
+        *point_centroid,
     );
 }
 
-fn get_min_centroid<'a>(
+fn get_min_centroid(
     point: &[f64],
-    centroids: impl Iterator<Item = &'a Vec<f64>>,
+    centroids: &[Vec<f64>],
 ) -> (usize, f64) {
-    let mut min_distance = f64::MAX;
+    let mut min_distance_squared = f64::MAX;
     let mut min_index = 0;
 
-    for (j, centroid) in centroids.enumerate() {
-        let distance = get_distance(point, centroid);
-        if distance < min_distance {
-            min_distance = distance;
+    for (j, centroid) in centroids.iter().enumerate() {
+        let distance_squared = get_distance_squared(point, centroid);
+        if distance_squared < min_distance_squared {
+            min_distance_squared = distance_squared;
             min_index = j;
         }
     }
 
-    (min_index, min_distance)
+    (min_index, min_distance_squared.sqrt())
+}
+
+fn get_min_centroid_skip_point_centroid(
+    point: &[f64],
+    centroids: &[Vec<f64>],
+    point_centroid: usize,
+) -> (usize, f64) {
+    let mut min_distance_squared = f64::MAX;
+    let mut min_index = 0;
+
+    for (j, centroid) in centroids.iter().enumerate() {
+        if j == point_centroid {
+            continue;
+        }
+
+        let distance_squared = get_distance_squared(point, centroid);
+        if distance_squared < min_distance_squared {
+            min_distance_squared = distance_squared;
+            min_index = j;
+        }
+    }
+
+    (min_index, min_distance_squared.sqrt())
 }
 
 fn get_distance(a: &[f64], b: &[f64]) -> f64 {
@@ -246,6 +271,13 @@ fn get_distance(a: &[f64], b: &[f64]) -> f64 {
         .map(|(a, b)| (*a - *b).powi(2))
         .sum::<f64>()
         .sqrt()
+}
+
+fn get_distance_squared(a: &[f64], b: &[f64]) -> f64 {
+    a.iter()
+        .zip(b.iter())
+        .map(|(a, b)| (*a - *b).powi(2))
+        .sum::<f64>()
 }
 
 #[cfg(target_arch = "wasm32")]

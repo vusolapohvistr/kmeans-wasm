@@ -60,49 +60,27 @@ console.log(quantized_colors);
 
 ## Comparison with skmeans
 
-### Comparison for Data 1
-
 | Algorithm | k | 3 Dimensions | 10 Dimensions | 50 Dimensions |
-|-----------|---|--------------|---------------|---------------|
-| skmeans    | 2 | 5.33         | 1.82          | 7.47          |
-| skmeans    |10 | 6.54         | 12.34         | 25.97         |
-| skmeans    |50 | 15.63        | 25.75         | 77.47         |
-| kmeans-wasm| 2 | 1.92         | 1.30          | 5.49          |
-| kmeans-wasm|10 | 0.94         | 2.23          | 8.82          |
-| kmeans-wasm|50 | 1.98         | 4.46          | 16.46         |
+|------------|---|--------------|---------------|---------------|
+| skmeans | 2 | 16.73 | 34.28 | 249.82 |
+| skmeans |10 | 75.29 | 348.19 | 1188.29 |
+| skmeans |50 | 478.65 | 1185.82 | 3775.68 |
+| kmeans-wasm| 2 | 12.96 | 21.87 | 119.22 |
+| kmeans-wasm|10 | 27.37 | 81.18 | 422.66 |
+| kmeans-wasm|50 | 87.59 | 310.45 | 1824.67 |
 
-### Comparison for Data 2
-
-| Algorithm | k | 3 Dimensions | 10 Dimensions | 50 Dimensions |
-|-----------|---|--------------|---------------|---------------|
-| skmeans    | 2 | 4.87         | 2.37          | 7.22          |
-| skmeans    |10 | 6.69         | 14.67         | 34.22         |
-| skmeans    |50 | 12.72        | 25.79         | 84.56         |
-| kmeans-wasm| 2 | 0.97         | 1.36          | 5.76          |
-| kmeans-wasm|10 | 0.90         | 1.92          | 8.50          |
-| kmeans-wasm|50 | 1.81         | 4.12          | 16.10         |
+Caption: Comparison of average execution time (in milliseconds) for skmeans and kmeans-wasm with different dimensions and cluster sizes (k). The data size is 10,000 points, and the maximum number of iterations is 100.
 
 ### Comparison for RGB Data
 
 | Algorithm    | k | 3 Dimensions |
 |--------------|---|--------------|
-| skmeans RGB  | 2 | 450.54       |
-| skmeans RGB  |10 | 8436.12      |
-| skmeans RGB  |50 | 51703.41     |
-| kmeans-wasm RGB| 2 | 135.91      |
-| kmeans-wasm RGB|10 | 248.79      |
-| kmeans-wasm RGB|50 | 880.50      |
-
-### Comparison for RGB Data 2
-
-| Algorithm    | k | 3 Dimensions |
-|--------------|---|--------------|
-| skmeans RGB  | 2 | 420.94       |
-| skmeans RGB  |10 | 8149.42      |
-| skmeans RGB  |50 | 51334.09     |
-| kmeans-wasm RGB| 2 | 137.31      |
-| kmeans-wasm RGB|10 | 266.48      |
-| kmeans-wasm RGB|50 | 949.77      |
+| skmeans RGB   | 2 | 450.54       |
+| skmeans RGB   | 10 | 8436.12     |
+| skmeans RGB   | 50 | 51703.41    |
+| kmeans_rgb RGB| 2 | 135.91       |
+| kmeans_rgb RGB| 10 | 248.79      |
+| kmeans_rgb RGB| 50 | 880.50      |
 
 You can test it yourself on <https://ycatbink0t.github.io/kmeans-web-comparison/>
 
