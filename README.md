@@ -60,27 +60,7 @@ console.log(quantized_colors);
 
 ## Comparison with skmeans
 
-| Algorithm | k | 3 Dimensions | 10 Dimensions | 50 Dimensions |
-|------------|---|--------------|---------------|---------------|
-| skmeans | 2 | 16.73 | 34.28 | 249.82 |
-| skmeans |10 | 75.29 | 348.19 | 1188.29 |
-| skmeans |50 | 478.65 | 1185.82 | 3775.68 |
-| kmeans-wasm| 2 | 12.96 | 21.87 | 119.22 |
-| kmeans-wasm|10 | 27.37 | 81.18 | 422.66 |
-| kmeans-wasm|50 | 87.59 | 310.45 | 1824.67 |
-
-Caption: Comparison of average execution time (in milliseconds) for skmeans and kmeans-wasm with different dimensions and cluster sizes (k). The data size is 10,000 points, and the maximum number of iterations is 100.
-
-### Comparison for RGB Data
-
-| Algorithm    | k | 3 Dimensions |
-|--------------|---|--------------|
-| skmeans RGB   | 2 | 450.54       |
-| skmeans RGB   | 10 | 8436.12     |
-| skmeans RGB   | 50 | 51703.41    |
-| kmeans_rgb RGB| 2 | 135.91       |
-| kmeans_rgb RGB| 10 | 248.79      |
-| kmeans_rgb RGB| 50 | 880.50      |
+kmeans-wasm is faster.
 
 You can test it yourself on <https://ycatbink0t.github.io/kmeans-web-comparison/>
 
