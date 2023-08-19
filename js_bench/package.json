@@ -9,7 +9,7 @@
     "build": "tsc",
     "prebuild": "npm run generate-wasm",
     "prestart": "npm run generate-wasm",
-    "generate-wasm": "cd .. && wasm-pack build --out-dir kmeans-wasm-node --target nodejs --profiling && cd js_bench && npm i ../kmeans-wasm-node"
+    "generate-wasm": "cd .. && RUSTFLAGS=\"-C target-feature=+simd128,+bulk-memory,+reference-types,+sign-ext\" wasm-pack build --out-dir kmeans-wasm-node --target nodejs --profiling && cd js_bench && npm i ../kmeans-wasm-node"
   },
   "author": "Serhii Pylypchuk",
   "license": "MIT",
