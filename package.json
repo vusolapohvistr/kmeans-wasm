@@ -25,6 +25,7 @@
     "package:check": "npm run build && publint --strict pkg && attw --pack --profile esm-only pkg",
     "release": "release-it",
     "release:dry": "release-it --dry-run",
+    "release:stage": "node scripts/stage-npm-release.mjs",
     "test": "cargo test --locked",
     "test:web": "wasm-pack test --chrome --headless"
   },

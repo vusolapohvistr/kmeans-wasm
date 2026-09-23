@@ -30,6 +30,7 @@
     "after:bump": [
       "cargo generate-lockfile --offline",
       "npm run package:check"
-    ]
+    ],
+    "after:release": "npm run release:stage"
   }
 }

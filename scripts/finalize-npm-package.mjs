@@ -50,7 +50,6 @@ manifest.exports = {
 manifest.publishConfig = {
   ...manifest.publishConfig,
   access: "public",
-  provenance: true,
 };
 
 await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);

@@ -97,21 +97,18 @@ The release build is written to `pkg/`. Run `npm run package:check` to rebuild i
 
 ## Releases
 
-Releases use [`release-it`](https://github.com/release-it/release-it) for the local release workflow and npm trusted publishing (OIDC) in GitHub Actions for publication. No npm access token is stored in the repository.
+Releases use [`release-it`](https://github.com/release-it/release-it) locally. It reads and writes the version in `Cargo.toml`, refreshes `Cargo.lock`, runs the checks, commits the release, creates a `vX.Y.Z` tag, pushes it, and creates the GitHub Release.
 
-`release-it` reads and writes the version in `Cargo.toml`, refreshes `Cargo.lock`, runs the checks, commits the release, creates a `vX.Y.Z` tag, pushes it, and creates the GitHub Release. Its npm plugin is disabled intentionally: the release workflow is the only publisher and stages the generated package for 2FA approval.
+After the GitHub Release is created, the `release:stage` hook runs `npm stage publish` against the generated `pkg/` directory. npm staging does not require a 2FA prompt; a maintainer must inspect the tarball and approve it with 2FA. This is compatible with npm's planned January 2027 removal of direct publishing through bypass-2FA GATs. There is no GitHub Actions npm publisher and no npm token in the repository.
 
-A package maintainer must configure the trusted publisher once after the release workflow is merged:
+Before releasing, authenticate locally with npm's web login:
 
 ```sh
-npm trust github kmeans-wasm \
-  --repo vusolapohvistr/kmeans-wasm \
-  --file publish.yml \
-  --env npm \
-  --allow-stage-publish
+npm login --auth-type=web --registry=https://registry.npmjs.org
+npm whoami
 ```
 
-Then select **Require two-factor authentication and disallow tokens** in the package's npm publishing settings.
+Do not commit `.npmrc` or tokens. If a token is required, use an npm granular access token with **Read and write (stage only)** permissions for `kmeans-wasm`; never use a bypass-2FA token for direct publishing.
 
 To release:
 
@@ -131,9 +128,9 @@ To release:
    npm run release
    ```
 
-   Without `GITHUB_TOKEN`, `release-it` opens a prefilled GitHub Release page for manual confirmation. Set a repository-scoped `GITHUB_TOKEN` when automated GitHub Release creation is preferred.
+   Without `GITHUB_TOKEN`, `release-it` opens a prefilled GitHub Release page for manual confirmation; set a repository-scoped `GITHUB_TOKEN` when automated GitHub Release creation is preferred. After the release is created, the local hook stages the npm tarball.
 
-4. The `Stage npm release` workflow builds the package, verifies the tag/version match, and submits it to npm's staging queue (`latest` for stable releases, `next` for prereleases). Inspect and approve it with 2FA:
+4. Inspect and approve the staged npm package with 2FA:
 
    ```sh
    npm stage list kmeans-wasm
@@ -141,7 +138,7 @@ To release:
    npm stage approve <stage-id>
    ```
 
-Trusted publishing attaches npm provenance automatically. Reject a staged release with `npm stage reject <stage-id>` if manual inspection finds a problem.
+Stable versions use the `latest` npm tag and prereleases use `next`. Reject a staged release with `npm stage reject <stage-id>` if manual inspection finds a problem.
 
 ## Comparison with skmeans
 
