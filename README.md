@@ -118,7 +118,7 @@ npm run bench:rgb
 
 The benchmark uses deterministic RGB point sets, reports median wall time, and prints a table suitable for updating the page. The Rust Criterion benchmark is also available with `cargo bench --bench kmeans_rgb`.
 
-The earlier 1,000-pixel example was too small to be representative: startup, input conversion, and measurement noise dominated the result. The native benchmark now pre-generates its input and tests 10k, 100k, and 409,600 pixels; the JavaScript benchmark rebuilds the WASM artifact before every benchmark run. The single-image comparison page reports the browser clustering time for both implementations.
+The earlier 1,000-pixel example was too small to be representative: startup, input conversion, and measurement noise dominated the result. The native benchmark keeps the 3.1.0 benchmark shape and uses ten times as many points (10,000 random RGB pixels, 3 centroids, 1,000 maximum iterations). The JavaScript benchmark rebuilds the WASM artifact before every benchmark run. The single-image comparison page reports the browser clustering time for both implementations.
 
 ### Reference RGB results
 
