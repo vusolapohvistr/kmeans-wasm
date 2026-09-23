@@ -1,24 +1,52 @@
 use std::hint::black_box;
+use std::time::Duration;
 
-use criterion::{Criterion, criterion_group, criterion_main};
+use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
+use rand::{RngExt, rng};
 
 use kmeans_wasm::*;
-use rand::{RngExt, rng};
+
+const MAX_ITERATIONS: usize = 100;
+const CONVERGENCE_THRESHOLD: f64 = 0.1;
+
+fn random_pixels(count: usize, rng: &mut impl rand::Rng) -> Vec<u8> {
+    (0..count)
+        .flat_map(|_| [rng.random::<u8>(), rng.random::<u8>(), rng.random::<u8>()])
+        .collect()
+}
 
 fn criterion_benchmark(c: &mut Criterion) {
     let mut rng = rng();
-    let mut get_pixels = || {
-        (0..10_000)
-            .flat_map(|_| [rng.random::<u8>(), rng.random::<u8>(), rng.random::<u8>()])
-            .collect::<Vec<u8>>()
-    };
-
     let mut group = c.benchmark_group("kmeans_rgb");
-    // Keep the 3.1.0 benchmark shape, with ten times as many input points.
-    group.significance_level(0.1).sample_size(1000);
-    group.bench_function("10^4 random pixels, 3 centroids, kmeans_rgb", |b| {
-        b.iter(|| kmeans_rgb(black_box(get_pixels()), 3, 1000, Some(0.1)))
-    });
+
+    // Keep setup out of the measured function. The previous benchmark generated a
+    // new random image inside every iteration, which made the result sensitive to
+    // RNG and allocator noise rather than the clustering work.
+    group
+        .sample_size(30)
+        .measurement_time(Duration::from_secs(5))
+        .significance_level(0.1);
+
+    for (pixel_count, color_count) in [(10_000, 4_usize), (100_000, 16), (409_600, 32)] {
+        let pixels = random_pixels(pixel_count, &mut rng);
+        let id = BenchmarkId::new("random_rgb", format!("{pixel_count}px_k{color_count}"));
+
+        group.bench_with_input(id, &pixels, |b, pixels| {
+            b.iter_batched(
+                || pixels.clone(),
+                |pixels| {
+                    black_box(kmeans_rgb(
+                        pixels,
+                        color_count,
+                        MAX_ITERATIONS,
+                        Some(CONVERGENCE_THRESHOLD),
+                    ))
+                },
+                BatchSize::SmallInput,
+            )
+        });
+    }
+
     group.finish();
 }
 
