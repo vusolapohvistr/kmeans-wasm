@@ -97,9 +97,11 @@ The release build is written to `pkg/`. Run `npm run package:check` to rebuild i
 
 ## Releases
 
-The npm package is released from GitHub Actions with npm trusted publishing (OIDC). No npm access token is stored in the repository. The workflow stages the package, and a maintainer must inspect it and approve publication with 2FA.
+Releases use [`release-it`](https://github.com/release-it/release-it) for the local release workflow and npm trusted publishing (OIDC) in GitHub Actions for publication. No npm access token is stored in the repository.
 
-A package maintainer must configure the trusted publisher once after this workflow is merged:
+`release-it` reads and writes the version in `Cargo.toml`, refreshes `Cargo.lock`, runs the checks, commits the release, creates a `vX.Y.Z` tag, pushes it, and creates the GitHub Release. Its npm plugin is disabled intentionally: the release workflow is the only publisher and stages the generated package for 2FA approval.
+
+A package maintainer must configure the trusted publisher once after the release workflow is merged:
 
 ```sh
 npm trust github kmeans-wasm \
@@ -113,10 +115,25 @@ Then select **Require two-factor authentication and disallow tokens** in the pac
 
 To release:
 
-1. Set `package.version` in `Cargo.toml` to the new semantic version.
-2. Merge the version bump through CI.
-3. Publish a GitHub release whose tag is `vX.Y.Z` and matches the Cargo version.
-4. Inspect and approve the staged package:
+1. Merge the release changes to `main` and make sure CI is green.
+2. Pull `main`, install dependencies, and preview the release:
+
+   ```sh
+   git switch main
+   git pull --ff-only
+   npm ci
+   npm run release:dry
+   ```
+
+3. Start the release and choose the semantic version:
+
+   ```sh
+   npm run release
+   ```
+
+   Without `GITHUB_TOKEN`, `release-it` opens a prefilled GitHub Release page for manual confirmation. Set a repository-scoped `GITHUB_TOKEN` when automated GitHub Release creation is preferred.
+
+4. The `Stage npm release` workflow builds the package, verifies the tag/version match, and submits it to npm's staging queue. Inspect and approve it with 2FA:
 
    ```sh
    npm stage list kmeans-wasm

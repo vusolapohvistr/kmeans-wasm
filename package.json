@@ -23,11 +23,15 @@
     "check": "npm run lint && npm test && npm run package:check",
     "lint": "cargo fmt --check && cargo clippy --locked --all-targets -- -D warnings",
     "package:check": "npm run build && publint --strict pkg && attw --pack --profile esm-only pkg",
+    "release": "release-it",
+    "release:dry": "release-it --dry-run",
     "test": "cargo test --locked",
     "test:web": "wasm-pack test --chrome --headless"
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "^0.18.5",
-    "publint": "^0.3.24"
+    "@release-it/bumper": "^8.0.1",
+    "publint": "^0.3.24",
+    "release-it": "^21.1.0"
   }
 }
