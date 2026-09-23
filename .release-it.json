@@ -1,0 +1,35 @@
+{
+  "$schema": "https://unpkg.com/release-it@21/schema/release-it.json",
+  "plugins": {
+    "@release-it/bumper": {
+      "in": {
+        "file": "Cargo.toml",
+        "path": "package.version"
+      },
+      "out": {
+        "file": "Cargo.toml",
+        "path": "package.version"
+      }
+    }
+  },
+  "git": {
+    "requireBranch": "main",
+    "requireCleanWorkingDir": true,
+    "requireUpstream": true,
+    "commitMessage": "chore: release v${version}",
+    "tagName": "v${version}"
+  },
+  "npm": false,
+  "github": {
+    "release": true,
+    "releaseName": "v${version}",
+    "autoGenerate": true
+  },
+  "hooks": {
+    "after:init": "npm run check",
+    "after:bump": [
+      "cargo generate-lockfile --offline",
+      "npm run package:check"
+    ]
+  }
+}

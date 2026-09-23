@@ -1,7 +1,7 @@
 mod kmeans_triangle;
 
-use js_sys::{Array, Object, Function, Reflect};
-use wasm_bindgen::{prelude::*, JsCast};
+use js_sys::{Array, Function, Object, Reflect};
+use wasm_bindgen::{JsCast, prelude::*};
 
 #[wasm_bindgen]
 /// Find the k-means centroids of an RGB u8 slice for color quantization.
@@ -56,7 +56,8 @@ pub fn kmeans_rgb(
             .collect(),
     );
 
-    Ok(centroids.centroids
+    Ok(centroids
+        .centroids
         .iter()
         .flat_map(|centroid| [centroid[0] as u8, centroid[1] as u8, centroid[2] as u8])
         .collect())
@@ -72,7 +73,7 @@ export interface IKmeansResult {
     /** The value for each centroid of the cluster */
     centroids: number[][];
     /** The index to the centroid corresponding to each value of the data array */
-    idxs: number[];
+    idxs: Uint32Array;
     /** Function to test new point membership */
     test: (point: number[], fnDist?: (a: number[], b: number[]) => number) => number;
 }
@@ -164,11 +165,28 @@ pub fn kmeans(
     }
 
     let result_js = Object::new();
-    Reflect::set(&result_js, &JsValue::from_str("k"), &JsValue::from_f64(k as f64))?;
-    Reflect::set(&result_js, &JsValue::from_str("it"), &JsValue::from_f64(result.iterations as f64))?;
-    Reflect::set(&result_js, &JsValue::from_str("centroids"), &centroids_array)?;
+    Reflect::set(
+        &result_js,
+        &JsValue::from_str("k"),
+        &JsValue::from_f64(k as f64),
+    )?;
+    Reflect::set(
+        &result_js,
+        &JsValue::from_str("it"),
+        &JsValue::from_f64(result.iterations as f64),
+    )?;
+    Reflect::set(
+        &result_js,
+        &JsValue::from_str("centroids"),
+        &centroids_array,
+    )?;
     Reflect::set(&result_js, &JsValue::from_str("idxs"), &p_c)?;
-    Reflect::set(&result_js, &JsValue::from_str("test"), &Function::new_with_args("point, fnDist", "
+    Reflect::set(
+        &result_js,
+        &JsValue::from_str("test"),
+        &Function::new_with_args(
+            "point, fnDist",
+            "
         if (point.length !== this.centroids.length) {
             throw new Error('Point should have the same length as centroid');
         }
@@ -193,7 +211,9 @@ pub fn kmeans(
         }
 
         return minCentroid;
-    "))?;
+    ",
+        ),
+    )?;
 
     Ok(result_js)
 }

@@ -1,13 +1,15 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use std::hint::black_box;
+
+use criterion::{Criterion, criterion_group, criterion_main};
 
 use kmeans_wasm::*;
-use rand::{thread_rng, Rng};
+use rand::{RngExt, rng};
 
 fn criterion_benchmark(c: &mut Criterion) {
-    let mut rng = thread_rng();
+    let mut rng = rng();
     let mut get_pixels = || {
         (0..1_000)
-            .flat_map(|_| [rng.gen::<u8>(), rng.gen::<u8>(), rng.gen::<u8>()])
+            .flat_map(|_| [rng.random::<u8>(), rng.random::<u8>(), rng.random::<u8>()])
             .collect::<Vec<u8>>()
     };
 

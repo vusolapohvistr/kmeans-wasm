@@ -1,0 +1,81 @@
+name: Stage npm release
+
+on:
+  release:
+    types:
+      - published
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: npm-release
+  cancel-in-progress: false
+
+jobs:
+  stage:
+    name: Build, verify, and stage package
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: npm
+    env:
+      CARGO_TERM_COLOR: always
+
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.15.0
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
+        with:
+          toolchain: 1.96.0
+          components: clippy, rustfmt
+          targets: wasm32-unknown-unknown
+
+      - name: Install npm
+        run: npm install --global npm@12.1.0
+
+      - name: Install JavaScript tooling
+        run: npm ci
+
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --version 0.15.0 --locked
+
+      - name: Run release checks
+        run: npm run check
+
+      - name: Test WebAssembly build
+        run: npm run test:web
+
+      - name: Verify release version
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          package_version="$(node -p "require('./pkg/package.json').version")"
+          if [[ "v${package_version}" != "${RELEASE_TAG}" ]]; then
+            echo "Release tag ${RELEASE_TAG} does not match package version ${package_version}." >&2
+            exit 1
+          fi
+
+      - name: Stage package for 2FA approval
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          dist_tag=latest
+          if [[ "${RELEASE_TAG}" == *-* ]]; then
+            dist_tag=next
+          fi
+          npm stage publish --tag "${dist_tag}" ./pkg
+
+      - name: Explain approval step
+        run: |
+          echo "The package is staged. A maintainer must inspect it with 'npm stage list kmeans-wasm'"
+          echo "and approve it with 2FA using 'npm stage approve <stage-id>'."

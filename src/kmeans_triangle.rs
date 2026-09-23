@@ -34,12 +34,8 @@ pub fn hamerly_kmeans(
 
     while iterations < max_iter {
         for (j, centroid) in centroids.iter().enumerate() {
-            centroid_closest_centroid_distance[j] = get_min_centroid_skip_point_centroid(
-                centroid,
-                &centroids,
-                j,
-            )
-            .1;
+            centroid_closest_centroid_distance[j] =
+                get_min_centroid_skip_point_centroid(centroid, &centroids, j).1;
         }
 
         for (((point, point_centroid), lower_bound), upper_bound) in points
@@ -217,17 +213,10 @@ fn point_all_centers(
     point_centroid: &mut usize,
 ) {
     (*point_centroid, *upper_bound) = get_min_centroid(point, centroids);
-    (_, *lower_bound) = get_min_centroid_skip_point_centroid(
-        point,
-        centroids,
-        *point_centroid,
-    );
+    (_, *lower_bound) = get_min_centroid_skip_point_centroid(point, centroids, *point_centroid);
 }
 
-fn get_min_centroid(
-    point: &[f64],
-    centroids: &[Vec<f64>],
-) -> (usize, f64) {
+fn get_min_centroid(point: &[f64], centroids: &[Vec<f64>]) -> (usize, f64) {
     let mut min_distance_squared = f64::MAX;
     let mut min_index = 0;
 
@@ -283,31 +272,26 @@ fn get_distance_squared(a: &[f64], b: &[f64]) -> f64 {
 #[cfg(target_arch = "wasm32")]
 use js_sys::Math;
 #[cfg(not(target_arch = "wasm32"))]
-use rand::prelude::{SliceRandom, StdRng};
-#[cfg(not(target_arch = "wasm32"))]
-use rand::SeedableRng;
+use rand::prelude::{IndexedRandom, SeedableRng, StdRng};
 
+#[cfg(target_arch = "wasm32")]
 fn get_centroids(points: &[Vec<f64>], k: usize) -> Vec<Vec<f64>> {
     let mut centroids = Vec::with_capacity(k);
+    let mut chosen_indices = Vec::with_capacity(k);
 
-    #[cfg(target_arch = "wasm32")]
-    {
-        let mut chosen_indices = Vec::with_capacity(k);
-        while centroids.len() < k {
-            let random_index = (Math::random() * (points.len() as f64)) as usize;
-            if !chosen_indices.contains(&random_index) {
-                centroids.push(points[random_index].clone());
-                chosen_indices.push(random_index);
-            }
+    while centroids.len() < k {
+        let random_index = (Math::random() * (points.len() as f64)) as usize;
+        if !chosen_indices.contains(&random_index) {
+            centroids.push(points[random_index].clone());
+            chosen_indices.push(random_index);
         }
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        let mut rng = StdRng::seed_from_u64(0);
-        centroids = points.choose_multiple(&mut rng, k).cloned().collect();
     }
 
     centroids
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+fn get_centroids(points: &[Vec<f64>], k: usize) -> Vec<Vec<f64>> {
+    let mut rng = StdRng::seed_from_u64(0);
+    points.sample(&mut rng, k).cloned().collect()
+}

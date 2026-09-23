@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Quality and package checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CARGO_TERM_COLOR: always
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.15.0
+          package-manager-cache: false
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
+        with:
+          toolchain: 1.96.0
+          components: clippy, rustfmt
+          targets: wasm32-unknown-unknown
+
+      - name: Install npm
+        run: npm install --global npm@12.1.0
+
+      - name: Install JavaScript tooling
+        run: npm ci
+
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --version 0.15.0 --locked
+
+      - name: Lint Rust
+        run: npm run lint
+
+      - name: Test native build
+        run: npm test
+
+      - name: Test WebAssembly build
+        run: npm run test:web
+
+      - name: Build and validate npm package
+        run: npm run package:check
+
+      - name: Audit JavaScript tooling
+        run: npm audit --audit-level=high
