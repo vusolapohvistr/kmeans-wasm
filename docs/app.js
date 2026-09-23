@@ -1,22 +1,15 @@
-const MAX_PREVIEW_EDGE = 800;
-const DEFAULT_IMAGE = "./assets/blue-marble.jpg";
+const MAX_EDGE = 480;
+const PALETTE_SIZE = 16;
+const MAX_ITERATIONS = 30;
+const SEED = 0x12345678;
 
-const $ = (selector) => document.querySelector(selector);
-const sourceCanvas = $("#source-canvas");
-const quantizedCanvas = $("#quantized-canvas");
+const sourceCanvas = document.querySelector("#source-canvas");
+const wasmCanvas = document.querySelector("#wasm-canvas");
+const skmeansCanvas = document.querySelector("#skmeans-canvas");
 const sourceContext = sourceCanvas.getContext("2d", { willReadFrequently: true });
-const quantizedContext = quantizedCanvas.getContext("2d");
-const imageUpload = $("#image-upload");
-const colorizeButton = $("#colorize-button");
-const status = $("#status");
-const paletteInput = $("#palette-size");
-const iterationsInput = $("#iterations");
-const thresholdInput = $("#threshold");
-
-let currentImage;
-let objectUrl;
-let kmeansRgb;
-let isBusy = false;
+const wasmContext = wasmCanvas.getContext("2d");
+const skmeansContext = skmeansCanvas.getContext("2d");
+const status = document.querySelector("#status");
 
 function setStatus(message, isError = false) {
   status.textContent = message;
@@ -24,55 +17,69 @@ function setStatus(message, isError = false) {
 }
 
 function formatTime(milliseconds) {
-  if (milliseconds < 1) {
-    return `${Math.round(milliseconds * 1000)} µs`;
+  return milliseconds < 1
+    ? `${Math.round(milliseconds * 1000)} µs`
+    : `${milliseconds.toFixed(milliseconds < 10 ? 2 : 1)} ms`;
+}
+
+function seededRandom(seed) {
+  let state = seed >>> 0;
+  return () => {
+    state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+    return state / 0x100000000;
+  };
+}
+
+function runWithSeed(operation) {
+  const originalRandom = Math.random;
+  Math.random = seededRandom(SEED);
+  try {
+    return operation();
+  } finally {
+    Math.random = originalRandom;
   }
-
-  return `${milliseconds.toFixed(milliseconds < 10 ? 2 : 1)} ms`;
 }
 
-function formatNumber(value) {
-  return new Intl.NumberFormat("en-US").format(value);
-}
-
-function updateControlValues() {
-  $("#palette-size-value").textContent = `${paletteInput.value} colors`;
-  $("#iterations-value").textContent = iterationsInput.value;
-  $("#threshold-value").textContent = Number(thresholdInput.value).toFixed(2);
-}
-
-function loadImageElement(source) {
+function loadImage() {
   return new Promise((resolve, reject) => {
     const image = new Image();
-    image.decoding = "async";
     image.onload = () => resolve(image);
-    image.onerror = () => reject(new Error("The image could not be loaded."));
-    image.src = source;
+    image.onerror = () => reject(new Error("The demo image could not be loaded."));
+    image.src = "./assets/blue-marble.jpg";
   });
 }
 
-function drawSource(image) {
-  const scale = Math.min(1, MAX_PREVIEW_EDGE / Math.max(image.naturalWidth, image.naturalHeight));
+function prepareImage(image) {
+  const scale = Math.min(1, MAX_EDGE / Math.max(image.naturalWidth, image.naturalHeight));
   const width = Math.max(1, Math.round(image.naturalWidth * scale));
   const height = Math.max(1, Math.round(image.naturalHeight * scale));
 
-  sourceCanvas.width = width;
-  sourceCanvas.height = height;
-  quantizedCanvas.width = width;
-  quantizedCanvas.height = height;
-  sourceContext.clearRect(0, 0, width, height);
-  sourceContext.drawImage(image, 0, 0, width, height);
-  quantizedContext.clearRect(0, 0, width, height);
-  quantizedContext.drawImage(image, 0, 0, width, height);
+  for (const canvas of [sourceCanvas, wasmCanvas, skmeansCanvas]) {
+    canvas.width = width;
+    canvas.height = height;
+  }
 
-  $("#source-meta").textContent = `${formatNumber(width)} × ${formatNumber(height)}`;
-  $("#pixels-stat").textContent = formatNumber(width * height);
-  $("#result-meta").textContent = "Run to colorize";
-  $("#palette-note").textContent = "Run the playground to populate";
-  $("#swatches").replaceChildren();
+  sourceContext.drawImage(image, 0, 0, width, height);
+  const rgba = sourceContext.getImageData(0, 0, width, height).data;
+  const pixelCount = width * height;
+  const rgb = new Uint8Array(pixelCount * 3);
+  const points = new Array(pixelCount);
+
+  for (let index = 0; index < pixelCount; index += 1) {
+    const rgbaOffset = index * 4;
+    const rgbOffset = index * 3;
+    const point = [rgba[rgbaOffset], rgba[rgbaOffset + 1], rgba[rgbaOffset + 2]];
+    rgb[rgbOffset] = point[0];
+    rgb[rgbOffset + 1] = point[1];
+    rgb[rgbOffset + 2] = point[2];
+    points[index] = point;
+  }
+
+  document.querySelector("#source-size").textContent = `${width} × ${height}`;
+  return { rgb, points, width, height };
 }
 
-function nearestPaletteColor(pixel, palette, offset) {
+function nearestColorIndex(pixel, palette, offset) {
   const red = pixel[offset];
   const green = pixel[offset + 1];
   const blue = pixel[offset + 2];
@@ -80,10 +87,10 @@ function nearestPaletteColor(pixel, palette, offset) {
   let nearestDistance = Number.POSITIVE_INFINITY;
 
   for (let paletteOffset = 0; paletteOffset < palette.length; paletteOffset += 3) {
-    const redDelta = red - palette[paletteOffset];
-    const greenDelta = green - palette[paletteOffset + 1];
-    const blueDelta = blue - palette[paletteOffset + 2];
-    const distance = redDelta * redDelta + greenDelta * greenDelta + blueDelta * blueDelta;
+    const dr = red - palette[paletteOffset];
+    const dg = green - palette[paletteOffset + 1];
+    const db = blue - palette[paletteOffset + 2];
+    const distance = dr * dr + dg * dg + db * db;
 
     if (distance < nearestDistance) {
       nearestDistance = distance;
@@ -94,147 +101,81 @@ function nearestPaletteColor(pixel, palette, offset) {
   return nearest;
 }
 
-function drawPalette(palette) {
-  const swatches = $("#swatches");
-  swatches.replaceChildren();
+function renderPaletteResult(context, width, height, rgba, palette, assignments = null) {
+  const output = context.createImageData(width, height);
+  const cache = new Map();
 
-  for (let offset = 0; offset < palette.length; offset += 3) {
-    const red = palette[offset].toString(16).padStart(2, "0");
-    const green = palette[offset + 1].toString(16).padStart(2, "0");
-    const blue = palette[offset + 2].toString(16).padStart(2, "0");
-    const swatch = document.createElement("span");
-    swatch.className = "swatch";
-    swatch.style.backgroundColor = `#${red}${green}${blue}`;
-    swatch.title = `#${red}${green}${blue}`;
-    swatches.append(swatch);
-  }
+  for (let pixel = 0; pixel < width * height; pixel += 1) {
+    const outputOffset = pixel * 4;
+    const rgbOffset = pixel * 3;
+    const key = (rgba[rgbOffset] << 16) | (rgba[rgbOffset + 1] << 8) | rgba[rgbOffset + 2];
+    let paletteOffset = assignments ? assignments[pixel] * 3 : undefined;
 
-  $("#palette-note").textContent = `${palette.length / 3} representative colors`;
-}
-
-function colorize() {
-  if (isBusy || !currentImage || !kmeansRgb) {
-    return;
-  }
-
-  const pixelCount = sourceCanvas.width * sourceCanvas.height;
-  const requestedColors = Number(paletteInput.value);
-  const colorCount = Math.min(requestedColors, pixelCount);
-
-  if (colorCount < 2) {
-    setStatus("Choose an image with at least two pixels.", true);
-    return;
-  }
-
-  isBusy = true;
-  colorizeButton.disabled = true;
-  setStatus("Clustering RGB pixels in WebAssembly…");
-  $("#result-meta").textContent = "Working…";
-
-  requestAnimationFrame(() => {
-    const imageData = sourceContext.getImageData(0, 0, sourceCanvas.width, sourceCanvas.height);
-    const rgb = new Uint8Array(imageData.data);
-    const clusteringStart = performance.now();
-    let palette;
-
-    try {
-      palette = kmeansRgb(
-        rgb,
-        colorCount,
-        Number(iterationsInput.value),
-        Number(thresholdInput.value),
-      );
-    } catch (error) {
-      isBusy = false;
-      colorizeButton.disabled = false;
-      setStatus(`Could not cluster the image: ${error.message ?? error}`, true);
-      return;
-    }
-
-    const clusteringTime = performance.now() - clusteringStart;
-    const mappingStart = performance.now();
-    const output = quantizedContext.createImageData(sourceCanvas.width, sourceCanvas.height);
-    const colorCache = new Map();
-
-    for (let offset = 0; offset < output.data.length; offset += 4) {
-      const pixelOffset = offset / 4;
-      const rgbOffset = pixelOffset * 3;
-      const colorKey = (rgb[rgbOffset] << 16) | (rgb[rgbOffset + 1] << 8) | rgb[rgbOffset + 2];
-      let paletteOffset = colorCache.get(colorKey);
-
+    if (paletteOffset === undefined) {
+      paletteOffset = cache.get(key);
       if (paletteOffset === undefined) {
-        paletteOffset = nearestPaletteColor(rgb, palette, rgbOffset);
-        colorCache.set(colorKey, paletteOffset);
+        paletteOffset = nearestColorIndex(rgba, palette, rgbOffset);
+        cache.set(key, paletteOffset);
       }
-
-      output.data[offset] = palette[paletteOffset];
-      output.data[offset + 1] = palette[paletteOffset + 1];
-      output.data[offset + 2] = palette[paletteOffset + 2];
-      output.data[offset + 3] = 255;
     }
 
-    quantizedContext.putImageData(output, 0, 0);
-    const mappingTime = performance.now() - mappingStart;
-    const totalTime = clusteringTime + mappingTime;
+    output.data[outputOffset] = palette[paletteOffset];
+    output.data[outputOffset + 1] = palette[paletteOffset + 1];
+    output.data[outputOffset + 2] = palette[paletteOffset + 2];
+    output.data[outputOffset + 3] = 255;
+  }
 
-    $("#palette-stat").textContent = `${colorCount} colors`;
-    $("#cluster-time-stat").textContent = formatTime(clusteringTime);
-    $("#mapping-time-stat").textContent = formatTime(mappingTime);
-    $("#result-meta").textContent = `${colorCount} colors · ${formatTime(totalTime)} total`;
-    drawPalette(palette);
-
-    isBusy = false;
-    colorizeButton.disabled = false;
-    setStatus(`Done in ${formatTime(totalTime)} — the image stayed in this browser.`);
-  });
+  context.putImageData(output, 0, 0);
 }
 
-async function useImage(image) {
-  currentImage = image;
-  drawSource(image);
-  colorize();
-}
-
-async function useUploadedFile(file) {
-  if (!file) {
-    return;
+function skmeansPalette(centroids) {
+  const palette = new Uint8Array(PALETTE_SIZE * 3);
+  for (let index = 0; index < PALETTE_SIZE; index += 1) {
+    const centroid = centroids[index] ?? [0, 0, 0];
+    for (let channel = 0; channel < 3; channel += 1) {
+      palette[index * 3 + channel] = Math.max(0, Math.min(255, Math.round(centroid[channel])));
+    }
   }
-
-  if (objectUrl) {
-    URL.revokeObjectURL(objectUrl);
-  }
-
-  objectUrl = URL.createObjectURL(file);
-  setStatus("Loading the selected image…");
-  try {
-    const image = await loadImageElement(objectUrl);
-    await useImage(image);
-  } catch (error) {
-    setStatus(error.message, true);
-  }
+  return palette;
 }
 
 async function initialize() {
-  updateControlValues();
-
-  [paletteInput, iterationsInput, thresholdInput].forEach((input) => {
-    input.addEventListener("input", updateControlValues);
-  });
-  colorizeButton.addEventListener("click", colorize);
-  imageUpload.addEventListener("change", (event) => useUploadedFile(event.target.files?.[0]));
-
   try {
+    setStatus("Loading WebAssembly and the comparison image…");
     const wasm = await import("./wasm/kmeans_wasm.js");
     await wasm.default();
-    kmeansRgb = wasm.kmeans_rgb;
-    setStatus("WebAssembly ready — loading the sample image…");
-    const image = await loadImageElement(DEFAULT_IMAGE);
-    await useImage(image);
-  } catch (error) {
-    setStatus(
-      `Could not initialize the playground: ${error.message ?? error}. Run "npm run pages:build" before serving docs/.`,
-      true,
+    if (typeof window.skmeans !== "function") {
+      throw new Error("The skmeans browser bundle did not load.");
+    }
+
+    const { rgb, points, width, height } = prepareImage(await loadImage());
+    const rgba = sourceContext.getImageData(0, 0, width, height).data;
+
+    const wasmStart = performance.now();
+    const wasmPalette = runWithSeed(() => wasm.kmeans_rgb(rgb, PALETTE_SIZE, MAX_ITERATIONS, 0.1));
+    renderPaletteResult(wasmContext, width, height, rgba, wasmPalette);
+    const wasmTime = performance.now() - wasmStart;
+    document.querySelector("#wasm-time").textContent = formatTime(wasmTime);
+
+    setStatus("Running skmeans for comparison…");
+    const skmeansStart = performance.now();
+    const skmeansResult = runWithSeed(() =>
+      window.skmeans(points, PALETTE_SIZE, undefined, MAX_ITERATIONS),
     );
+    renderPaletteResult(
+      skmeansContext,
+      width,
+      height,
+      rgba,
+      skmeansPalette(skmeansResult.centroids),
+      skmeansResult.idxs,
+    );
+    const skmeansTime = performance.now() - skmeansStart;
+    document.querySelector("#skmeans-time").textContent = formatTime(skmeansTime);
+
+    setStatus("Both results ready.");
+  } catch (error) {
+    setStatus(`Could not run the comparison: ${error.message ?? error}`, true);
   }
 }
 

@@ -97,7 +97,7 @@ The release build is written to `pkg/`. Run `npm run package:check` to rebuild i
 
 ## Browser playground
 
-The [GitHub Pages playground](https://vusolapohvistr.github.io/kmeans-wasm/) provides a large RGB color-quantization example using NASA's public-domain Blue Marble image. It builds the browser WebAssembly package into the ignored `docs/wasm/` directory:
+The [GitHub Pages comparison](https://vusolapohvistr.github.io/kmeans-wasm/) shows one public-domain Blue Marble image clustered with both `kmeans_rgb` and `skmeans`. It builds the browser WebAssembly package into the ignored `docs/wasm/` directory:
 
 ```sh
 npm ci
@@ -105,7 +105,7 @@ npm run pages:build
 npx serve docs
 ```
 
-The page supports local image upload, palette-size and iteration controls, a before/after preview, palette swatches, and a reference benchmark table. See the [demo source and deployment notes](https://github.com/vusolapohvistr/kmeans-wasm/tree/main/docs) for details.
+The page is intentionally a single-image comparison rather than a full application. See the [comparison source and deployment notes](https://github.com/vusolapohvistr/kmeans-wasm/tree/main/docs) for details.
 
 ## Benchmarks
 
@@ -118,7 +118,7 @@ npm run bench:rgb
 
 The benchmark uses deterministic RGB point sets, reports median wall time, and prints a table suitable for updating the page. The Rust Criterion benchmark is also available with `cargo bench --bench kmeans_rgb`.
 
-The earlier 1,000-pixel example was too small to be representative: startup, input conversion, and measurement noise dominated the result. The native benchmark now pre-generates its input and tests 10k, 100k, and 409,600 pixels; the JavaScript benchmark rebuilds the WASM artifact before every benchmark run. The complete browser colorization path also includes the palette-mapping pass shown separately on the playground.
+The earlier 1,000-pixel example was too small to be representative: startup, input conversion, and measurement noise dominated the result. The native benchmark now pre-generates its input and tests 10k, 100k, and 409,600 pixels; the JavaScript benchmark rebuilds the WASM artifact before every benchmark run. The single-image comparison page reports the browser clustering time for both implementations.
 
 ### Reference RGB results
 

@@ -1,6 +1,10 @@
 # RGB colorization playground
 
-This directory contains the GitHub Pages demo for `kmeans-wasm`.
+This directory contains a small GitHub Pages comparison for `kmeans-wasm`.
+
+The page loads one public-domain Blue Marble image and renders two 16-color results: the dedicated
+`kmeans_rgb` WebAssembly method and the MIT-licensed `skmeans` browser bundle. It deliberately does
+not include a larger application UI or image-upload controls.
 
 ## Local preview
 
@@ -13,13 +17,12 @@ npx serve docs
 ```
 
 The generated `docs/wasm/` directory is intentionally ignored. The page loads the release
-WebAssembly build from that directory and uses the public-domain Blue Marble image in
-`assets/blue-marble.jpg` as its default example.
+WebAssembly build from that directory and uses `assets/blue-marble.jpg` as its single example.
 
 ## Benchmark
 
-The benchmark table in the page is a reference run. To reproduce it locally with the current
-Node.js/npm toolchain, run:
+The benchmark table in the repository README is a reference run. To reproduce it locally with the
+current Node.js/npm toolchain, run:
 
 ```sh
 npm ci
