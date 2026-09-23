@@ -93,7 +93,47 @@ Run the browser test suite separately:
 npm run test:web
 ```
 
-The release build is written to `pkg/`. Run `npm run package:check` to rebuild it and validate it with `publint` and Are the Types Wrong?.
+The release build is written to `pkg/`. Run `npm run package:check` to rebuild it and validate it with `publint` and `attw`.
+
+## Browser playground
+
+The [GitHub Pages playground](https://vusolapohvistr.github.io/kmeans-wasm/) provides a large RGB color-quantization example using NASA's public-domain Blue Marble image. It builds the browser WebAssembly package into the ignored `docs/wasm/` directory:
+
+```sh
+npm ci
+npm run pages:build
+npx serve docs
+```
+
+The page supports local image upload, palette-size and iteration controls, a before/after preview, palette swatches, and a reference benchmark table. See the [demo source and deployment notes](https://github.com/vusolapohvistr/kmeans-wasm/tree/main/docs) for details.
+
+## Benchmarks
+
+Run the RGB comparison locally with the same release WebAssembly build used by the demo:
+
+```sh
+npm ci
+npm run bench:rgb
+```
+
+The benchmark uses deterministic RGB point sets, reports median wall time, and prints a table suitable for updating the page. The Rust Criterion benchmark is also available with `cargo bench --bench kmeans_rgb`.
+
+The earlier 1,000-pixel example was too small to be representative: startup, input conversion, and measurement noise dominated the result. The native benchmark now pre-generates its input and tests 10k, 100k, and 409,600 pixels; the JavaScript benchmark rebuilds the WASM artifact before every benchmark run. The complete browser colorization path also includes the palette-mapping pass shown separately on the playground.
+
+### Reference RGB results
+
+These are median wall times from a local Node.js 24.15.0 run using the release WebAssembly build, npm 12.1.0, two warm-ups, and eight measured runs. The browser playground shows the same table and is available at [vusolapohvistr.github.io/kmeans-wasm](https://vusolapohvistr.github.io/kmeans-wasm/).
+
+| Test | Pixels | Colors | `kmeans_rgb` | `skmeans` | Speed-up |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| RGB random pixels | 1,000 | 2 | 0.20 ms | 1.07 ms | 5.3× |
+| RGB random pixels | 10,000 | 4 | 1.21 ms | 4.43 ms | 3.7× |
+| RGB random pixels | 10,000 | 16 | 3.54 ms | 8.94 ms | 2.5× |
+| RGB random pixels | 100,000 | 2 | 4.67 ms | 20.33 ms | 4.4× |
+| RGB random pixels | 100,000 | 8 | 19.24 ms | 51.99 ms | 2.7× |
+| RGB random pixels | 100,000 | 32 | 81.57 ms | 138.80 ms | 1.7× |
+
+`kmeans_rgb` is measured directly; `skmeans` receives the equivalent three-dimensional points. Results vary by CPU, browser, initialization, and convergence behavior. See the [reproducible benchmark harness](https://github.com/vusolapohvistr/kmeans-wasm/blob/main/js_bench/src/rgb.ts) for details. The package finalizer copies this README into `pkg/`, so the table is also visible on the npm package page.
 
 ## Releases
 

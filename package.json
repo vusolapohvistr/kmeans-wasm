@@ -20,9 +20,11 @@
   "allowScripts": {},
   "scripts": {
     "build": "wasm-pack build --release --target bundler && node scripts/finalize-npm-package.mjs pkg",
+    "bench:rgb": "npm --prefix js_bench run bench:rgb",
     "check": "npm run lint && npm test && npm run package:check",
     "lint": "cargo fmt --check && cargo clippy --locked --all-targets -- -D warnings",
     "package:check": "npm run build && publint --strict pkg && attw --pack --profile esm-only pkg",
+    "pages:build": "wasm-pack build --release --target web --out-dir docs/wasm",
     "release": "release-it",
     "release:dry": "release-it --dry-run",
     "release:stage": "node scripts/stage-npm-release.mjs",

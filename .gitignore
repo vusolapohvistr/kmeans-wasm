@@ -3,6 +3,7 @@
 **/*.rs.bk
 bin/
 pkg/
+docs/wasm/
 wasm-pack.log
 .DS_Store
 kmeans-wasm-node

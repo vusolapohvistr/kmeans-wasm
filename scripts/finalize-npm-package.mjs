@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 
-import { readFile, readdir, writeFile } from "node:fs/promises";
+import { copyFile, readFile, readdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
 const outputDirectory = resolve(process.argv[2] ?? "pkg");
+const readmePath = resolve("README.md");
 const manifestPath = resolve(outputDirectory, "package.json");
 const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
 
@@ -53,3 +54,8 @@ manifest.publishConfig = {
 };
 
 await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+
+// Keep the published README in sync with the repository README. In particular,
+// the RGB benchmark table is part of the npm documentation and must be visible
+// from the package page.
+await copyFile(readmePath, resolve(outputDirectory, "README.md"));
