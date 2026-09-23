@@ -5,264 +5,58 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta
       name="description"
-      content="A browser playground for RGB color quantization with kmeans-wasm."
+      content="A small RGB color-quantization comparison for kmeans-wasm and skmeans."
     />
-    <title>kmeans-wasm · RGB color quantization</title>
+    <title>kmeans-wasm · RGB comparison</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
-    <header class="hero">
-      <nav class="nav shell" aria-label="Primary navigation">
-        <a class="brand" href="./" aria-label="kmeans-wasm home">
-          <span class="brand-mark" aria-hidden="true">◈</span>
-          <span>kmeans-wasm</span>
-        </a>
-        <div class="nav-links">
-          <a href="#colorize">Playground</a>
-          <a href="#benchmarks">Benchmarks</a>
-          <a href="https://github.com/vusolapohvistr/kmeans-wasm" rel="noreferrer">GitHub ↗</a>
-        </div>
-      </nav>
-
-      <div class="shell hero-content">
-        <p class="eyebrow"><span class="eyebrow-dot"></span> Rust · WebAssembly · Hamerly k-means</p>
-        <h1>Turn a photo into a <span>palette.</span></h1>
-        <p class="hero-copy">
-          A larger, interactive RGB color-quantization playground. The clustering runs locally in
-          your browser with <code>kmeans-wasm</code>; the image never leaves this page.
+    <main class="page">
+      <header class="header">
+        <p class="eyebrow">kmeans-wasm · RGB color quantization</p>
+        <h1>One image, two implementations.</h1>
+        <p class="intro">
+          The same public-domain image and 16-color palette, clustered in the browser with the
+          dedicated <code>kmeans_rgb</code> method and with <code>skmeans</code>.
         </p>
-        <div class="hero-facts" aria-label="Project facts">
-          <div><strong>SIMD</strong><span>release build</span></div>
-          <div><strong>0 uploads</strong><span>local processing</span></div>
-          <div><strong>1–32</strong><span>palette colors</span></div>
-        </div>
-      </div>
-      <div class="hero-glow hero-glow-one" aria-hidden="true"></div>
-      <div class="hero-glow hero-glow-two" aria-hidden="true"></div>
-    </header>
+        <a class="github-link" href="https://github.com/vusolapohvistr/kmeans-wasm" rel="noreferrer">GitHub ↗</a>
+      </header>
 
-    <main>
-      <section class="shell section" id="colorize">
+      <section class="comparison" aria-labelledby="comparison-title">
         <div class="section-heading">
-          <div>
-            <p class="section-kicker">01 / Playground</p>
-            <h2>Colorize an image</h2>
-          </div>
-          <p class="section-intro">
-            Start with NASA’s public-domain Blue Marble, or choose a local image. The preview is
-            rendered large; clustering is capped at 800px on the long edge for a responsive demo.
-          </p>
+          <h2 id="comparison-title">NASA / Apollo 17 · Blue Marble</h2>
+          <p id="status" role="status" aria-live="polite">Loading WebAssembly…</p>
         </div>
 
-        <div class="workspace-grid">
-          <aside class="controls card" aria-label="Colorization controls">
-            <div class="control-heading">
-              <span class="control-icon" aria-hidden="true">✦</span>
-              <div>
-                <h3>Quantization settings</h3>
-                <p>Adjust the result, then run it again.</p>
-              </div>
-            </div>
+        <div class="image-grid">
+          <figure class="image-card">
+            <canvas id="source-canvas" aria-label="Original Blue Marble image"></canvas>
+            <figcaption>Original</figcaption>
+          </figure>
+          <figure class="image-card">
+            <canvas id="wasm-canvas" aria-label="Image clustered with kmeans-wasm"></canvas>
+            <figcaption><code>kmeans_rgb</code> · <span id="wasm-time">—</span></figcaption>
+          </figure>
+          <figure class="image-card">
+            <canvas id="skmeans-canvas" aria-label="Image clustered with skmeans"></canvas>
+            <figcaption><code>skmeans</code> · <span id="skmeans-time">—</span></figcaption>
+          </figure>
+        </div>
 
-            <div class="control">
-              <div class="control-label">
-                <label for="palette-size">Palette size</label>
-                <output id="palette-size-value" for="palette-size">16 colors</output>
-              </div>
-              <input id="palette-size" type="range" min="2" max="32" value="16" step="1" />
-              <div class="range-ends"><span>2</span><span>32</span></div>
-            </div>
-
-            <div class="control">
-              <div class="control-label">
-                <label for="iterations">Maximum iterations</label>
-                <output id="iterations-value" for="iterations">30</output>
-              </div>
-              <input id="iterations" type="range" min="1" max="100" value="30" step="1" />
-              <div class="range-ends"><span>1</span><span>100</span></div>
-            </div>
-
-            <div class="control">
-              <div class="control-label">
-                <label for="threshold">Convergence threshold</label>
-                <output id="threshold-value" for="threshold">0.1</output>
-              </div>
-              <input id="threshold" type="range" min="0" max="1" value="0.1" step="0.01" />
-              <div class="range-ends"><span>precise</span><span>faster</span></div>
-            </div>
-
-            <label class="upload-control" for="image-upload">
-              <span class="upload-icon" aria-hidden="true">↑</span>
-              <span>
-                <strong>Use another image</strong>
-                <small>PNG, JPEG, or WebP · stays on your device</small>
-              </span>
-              <input id="image-upload" type="file" accept="image/png,image/jpeg,image/webp" />
-            </label>
-
-            <button class="primary-button" id="colorize-button" type="button">
-              <span>Colorize image</span>
-              <span aria-hidden="true">→</span>
-            </button>
-            <p class="status" id="status" role="status" aria-live="polite">Loading the WebAssembly module…</p>
-          </aside>
-
-          <div class="preview-column">
-            <div class="preview-grid">
-              <figure class="image-card card">
-                <figcaption>
-                  <span class="caption-index">A</span>
-                  <span>Original</span>
-                  <span class="caption-meta" id="source-meta">—</span>
-                </figcaption>
-                <div class="canvas-frame">
-                  <canvas id="source-canvas" aria-label="Original image preview"></canvas>
-                </div>
-              </figure>
-              <figure class="image-card card quantized-card">
-                <figcaption>
-                  <span class="caption-index">B</span>
-                  <span>Quantized</span>
-                  <span class="caption-meta" id="result-meta">Waiting…</span>
-                </figcaption>
-                <div class="canvas-frame">
-                  <canvas id="quantized-canvas" aria-label="Color quantized image preview"></canvas>
-                </div>
-              </figure>
-            </div>
-
-            <div class="result-bar card">
-              <div class="result-stat">
-                <span class="stat-label">Palette</span>
-                <strong id="palette-stat">16 colors</strong>
-              </div>
-              <div class="result-stat">
-                <span class="stat-label">Pixels</span>
-                <strong id="pixels-stat">—</strong>
-              </div>
-              <div class="result-stat">
-                <span class="stat-label">Clustering</span>
-                <strong id="cluster-time-stat">—</strong>
-              </div>
-              <div class="result-stat">
-                <span class="stat-label">Mapping</span>
-                <strong id="mapping-time-stat">—</strong>
-              </div>
-            </div>
-
-            <div class="palette-card card">
-              <div class="palette-heading">
-                <div>
-                  <p class="section-kicker">Representative colors</p>
-                  <h3>Palette preview</h3>
-                </div>
-                <span id="palette-note">Run the playground to populate</span>
-              </div>
-              <div class="swatches" id="swatches" aria-label="Color palette"></div>
-            </div>
-          </div>
+        <div class="details">
+          <span><strong>Source</strong><span id="source-size">—</span></span>
+          <span><strong>Palette</strong> 16 colors</span>
+          <span><strong>Processing</strong> local browser only</span>
         </div>
       </section>
 
-      <section class="benchmark-section" id="benchmarks">
-        <div class="shell section">
-          <div class="section-heading">
-            <div>
-              <p class="section-kicker">02 / Measurements</p>
-              <h2>Not just a pretty picture.</h2>
-            </div>
-            <p class="section-intro">
-              The local benchmark keeps the same RGB point set in memory and reports median wall
-              time. Run it on your machine before drawing conclusions from a tiny demo image.
-            </p>
-          </div>
-
-          <div class="benchmark-card card">
-            <div class="benchmark-toolbar">
-              <div>
-                <span class="table-kicker">RGB color quantization</span>
-                <h3>Reference run</h3>
-              </div>
-              <div class="benchmark-legend">
-                <span><i class="legend-dot wasm-dot"></i>kmeans_rgb</span>
-                <span><i class="legend-dot js-dot"></i>skmeans</span>
-              </div>
-            </div>
-            <div class="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th scope="col">Test</th>
-                    <th scope="col">Pixels</th>
-                    <th scope="col">Colors</th>
-                    <th scope="col">kmeans_rgb</th>
-                    <th scope="col">skmeans</th>
-                    <th scope="col">Speed-up</th>
-                  </tr>
-                </thead>
-                <tbody id="benchmark-body">
-                  <tr>
-                    <td><span class="test-name">RGB warm-up</span><small>random pixels</small></td>
-                    <td>1,000</td><td>2</td><td>0.20 ms</td><td>1.07 ms</td><td class="speed">5.3×</td>
-                  </tr>
-                  <tr>
-                    <td><span class="test-name">RGB balanced</span><small>random pixels</small></td>
-                    <td>10,000</td><td>4</td><td>1.21 ms</td><td>4.43 ms</td><td class="speed">3.7×</td>
-                  </tr>
-                  <tr>
-                    <td><span class="test-name">RGB palette</span><small>random pixels</small></td>
-                    <td>10,000</td><td>16</td><td>3.54 ms</td><td>8.94 ms</td><td class="speed">2.5×</td>
-                  </tr>
-                  <tr>
-                    <td><span class="test-name">RGB small k</span><small>random pixels</small></td>
-                    <td>100,000</td><td>2</td><td>4.67 ms</td><td>20.33 ms</td><td class="speed">4.4×</td>
-                  </tr>
-                  <tr>
-                    <td><span class="test-name">RGB photo-like</span><small>random pixels</small></td>
-                    <td>100,000</td><td>8</td><td>19.24 ms</td><td>51.99 ms</td><td class="speed">2.7×</td>
-                  </tr>
-                  <tr>
-                    <td><span class="test-name">RGB rich palette</span><small>random pixels</small></td>
-                    <td>100,000</td><td>32</td><td>81.57 ms</td><td>138.80 ms</td><td class="speed">1.7×</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-            <div class="benchmark-footer">
-              <p>Reference environment: Node.js 24.15.0, npm 12.1.0, release WASM build; median of 8 runs after warm-up.</p>
-              <code>npm run bench:rgb</code>
-            </div>
-          </div>
-          <p class="method-note">
-            The playground uses the specialized <code>kmeans_rgb</code> function for palette
-            discovery, then maps pixels to the nearest palette entry for the side-by-side preview.
-            The benchmark measures the clustering call itself; browser results vary by CPU and
-            browser.
-          </p>
-        </div>
-      </section>
-
-      <section class="shell section about-section">
-        <div class="about-card card">
-          <div>
-            <p class="section-kicker">Why WebAssembly?</p>
-            <h2>Keep the pixels close to the math.</h2>
-          </div>
-          <p>
-            <code>kmeans-wasm</code> implements the Hamerly k-means algorithm in Rust and ships it
-            as a small ES module. The release build enables WebAssembly SIMD and the playground
-            keeps image decoding, clustering, and palette mapping entirely in the browser.
-          </p>
-          <a class="text-link" href="https://www.npmjs.com/package/kmeans-wasm" rel="noreferrer">View the npm package ↗</a>
-        </div>
-      </section>
+      <footer>
+        <span>Image: <a href="./assets/ATTRIBUTION.md">NASA / Apollo 17, public domain</a> · <a href="./vendor/SKMEANS-ATTRIBUTION.md">skmeans MIT</a></span>
+        <a href="https://www.npmjs.com/package/kmeans-wasm" rel="noreferrer">npm package ↗</a>
+      </footer>
     </main>
 
-    <footer class="shell footer">
-      <span>kmeans-wasm · RGB playground</span>
-      <span>Demo image: <a href="./assets/ATTRIBUTION.md">NASA / Apollo 17, public domain</a></span>
-    </footer>
-
+    <script src="./vendor/skmeans.js"></script>
     <script type="module" src="./app.js"></script>
   </body>
 </html>
