@@ -101,20 +101,20 @@ function nearestColorIndex(pixel, palette, offset) {
   return nearest;
 }
 
-function renderPaletteResult(context, width, height, rgba, palette, assignments = null) {
+function renderPaletteResult(context, width, height, rgb, palette, assignments = null) {
   const output = context.createImageData(width, height);
   const cache = new Map();
 
   for (let pixel = 0; pixel < width * height; pixel += 1) {
     const outputOffset = pixel * 4;
     const rgbOffset = pixel * 3;
-    const key = (rgba[rgbOffset] << 16) | (rgba[rgbOffset + 1] << 8) | rgba[rgbOffset + 2];
+    const key = (rgb[rgbOffset] << 16) | (rgb[rgbOffset + 1] << 8) | rgb[rgbOffset + 2];
     let paletteOffset = assignments ? assignments[pixel] * 3 : undefined;
 
     if (paletteOffset === undefined) {
       paletteOffset = cache.get(key);
       if (paletteOffset === undefined) {
-        paletteOffset = nearestColorIndex(rgba, palette, rgbOffset);
+        paletteOffset = nearestColorIndex(rgb, palette, rgbOffset);
         cache.set(key, paletteOffset);
       }
     }
@@ -149,11 +149,10 @@ async function initialize() {
     }
 
     const { rgb, points, width, height } = prepareImage(await loadImage());
-    const rgba = sourceContext.getImageData(0, 0, width, height).data;
 
     const wasmStart = performance.now();
     const wasmPalette = runWithSeed(() => wasm.kmeans_rgb(rgb, PALETTE_SIZE, MAX_ITERATIONS, 0.1));
-    renderPaletteResult(wasmContext, width, height, rgba, wasmPalette);
+    renderPaletteResult(wasmContext, width, height, rgb, wasmPalette);
     const wasmTime = performance.now() - wasmStart;
     document.querySelector("#wasm-time").textContent = formatTime(wasmTime);
 
@@ -166,7 +165,7 @@ async function initialize() {
       skmeansContext,
       width,
       height,
-      rgba,
+      rgb,
       skmeansPalette(skmeansResult.centroids),
       skmeansResult.idxs,
     );
