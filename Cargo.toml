@@ -1,30 +1,35 @@
 [package]
 name = "kmeans-wasm"
-version = "3.0.0"
+version = "3.1.2"
 authors = ["Serhii Pylypchuk <sergiydjan@gmail.com>"]
-edition = "2018"
-repository = "https://github.com/ycatbink0t/kmeans-wasm"
-homepage = "https://github.com/ycatbink0t/kmeans-wasm"
+edition = "2024"
+rust-version = "1.86"
+description = "A fast k-means clustering implementation using WebAssembly for color quantization and general vector-space clustering."
+keywords = ["webassembly", "wasm", "k-means", "clustering", "color-quantization"]
+repository = "https://github.com/vusolapohvistr/kmeans-wasm"
+homepage = "https://github.com/vusolapohvistr/kmeans-wasm#readme"
 license = "MIT"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-wasm-bindgen = "0.2.84"
-js-sys = "0.3.61"
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-getrandom = { version = "*", features = ["js"] }
-rand = "*"
+wasm-bindgen = "0.2.128"
+js-sys = "0.3.105"
 
-[dev-dependencies]
-wasm-bindgen-test = "0.3.13"
-criterion = "0.3"
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+rand = "0.10.3"
+
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+wasm-bindgen-test = "0.3.78"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+criterion = "0.8.2"
 
 [profile.release]
 opt-level = 3
 lto = true
-panic = 'abort'
+panic = "abort"
 strip = true
 codegen-units = 1
 
@@ -33,8 +38,10 @@ name = "kmeans_rgb"
 harness = false
 
 [package.metadata.wasm-pack.profile.dev]
-wasm-opt = ['--enable-simd', '--enable-bulk-memory']
+wasm-opt = ["--enable-simd", "--enable-bulk-memory", "--enable-reference-types", "--enable-sign-ext", "--enable-nontrapping-float-to-int"]
+
 [package.metadata.wasm-pack.profile.profiling]
-wasm-opt = ['--enable-simd', '--enable-bulk-memory']
+wasm-opt = ["--enable-simd", "--enable-bulk-memory", "--enable-reference-types", "--enable-sign-ext", "--enable-nontrapping-float-to-int"]
+
 [package.metadata.wasm-pack.profile.release]
-wasm-opt = ['-O4', '--enable-simd', '--enable-bulk-memory']
+wasm-opt = ["-O4", "--enable-simd", "--enable-bulk-memory", "--enable-reference-types", "--enable-sign-ext", "--enable-nontrapping-float-to-int"]

@@ -1,24 +1,35 @@
 {
-  "name": "js_bench",
+  "name": "kmeans-wasm-benchmark",
   "version": "1.0.0",
-  "description": "Bench for wasm-kmeans",
-  "main": "build/index.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "tsc && node build/index.js",
-    "build": "tsc",
-    "prebuild": "npm run generate-wasm",
-    "prestart": "npm run generate-wasm",
-    "generate-wasm": "cd .. && RUSTFLAGS=\"-C target-feature=+simd128,+bulk-memory,+reference-types,+sign-ext\" wasm-pack build --out-dir kmeans-wasm-node --target nodejs --profiling && cd js_bench && npm i ../kmeans-wasm-node"
-  },
-  "author": "Serhii Pylypchuk",
+  "private": true,
+  "description": "JavaScript benchmarks for kmeans-wasm.",
   "license": "MIT",
+  "packageManager": "npm@12.1.0",
+  "devEngines": {
+    "runtime": {
+      "name": "node",
+      "version": "^22.22.2 || ^24.15.0 || >=26.0.0",
+      "onFail": "error"
+    },
+    "packageManager": {
+      "name": "npm",
+      "version": "12.1.0",
+      "onFail": "error"
+    }
+  },
+  "allowScripts": {},
+  "scripts": {
+    "build": "npm run generate:wasm && tsc",
+    "generate:wasm": "cd .. && wasm-pack build --release --target nodejs --out-dir kmeans-wasm-node && cd js_bench && npm install",
+    "start": "npm run build && node build/index.js",
+    "test": "tsc --noEmit"
+  },
   "dependencies": {
     "kmeans-wasm": "file:../kmeans-wasm-node",
-    "skmeans": "^0.11.3",
-    "typescript": "^5.0.4"
+    "skmeans": "^0.11.3"
   },
   "devDependencies": {
-    "@types/skmeans": "^0.11.4"
+    "@types/skmeans": "^0.11.4",
+    "typescript": "^7.0.2"
   }
 }

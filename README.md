@@ -1,77 +1,139 @@
 # kmeans-wasm
 
-A WebAssembly implementation of the k-means clustering algorithm for color quantization and general vector-space clustering.
+A fast k-means clustering implementation written in Rust and compiled to WebAssembly. It supports color quantization and general vector-space data, with JavaScript and TypeScript bindings.
 
-v2 uses no 'new' wasm features
-
-v3 uses simd128 wasm features to make execution faster
-
-features list: <https://webassembly.org/roadmap/>
+Version 3 uses WebAssembly SIMD (`simd128`) for performance. Use a runtime with SIMD support, such as Chrome 91+, Firefox 89+, or Safari 16.4+.
 
 ## Features
 
-Fast k-means clustering using the Hamerly algorithm  
-Can be used for color quantization in image processing  
-Works with any vector-space  
-Exports both JavaScript and TypeScript bindings  
+- Hamerly k-means algorithm
+- RGB color quantization
+- Arbitrary numeric vector spaces
+- JavaScript and TypeScript bindings
+- ES module package with a documented `exports` entry point
 
 ## Installation
 
- npm install kmeans-wasm
+```sh
+npm install kmeans-wasm
+```
+
+The published package targets JavaScript bundlers and exposes an ES module.
 
 ## Usage
 
-### K-means for any vector-space
+### General vector spaces
 
-To find the k-means centroids for any vector-space:
+```js
+import { kmeans } from "kmeans-wasm";
 
-```javascript
-import { kmeans } from 'kmeans-wasm';
-
-// Sample data - an array of arrays where each inner array represents a point in the vector-space
 const data = [
-[1, 2],
-[2, 3],
-[3, 4],
-[4, 5],
+  [1, 2],
+  [2, 3],
+  [3, 4],
+  [4, 5],
 ];
 
-const k = 3; // Number of clusters
-const max_iter = 1000; // Maximum number of iterations
-const convergence_threshold = 0.001; // Convergence threshold
+const result = kmeans(data, 3, 1_000, 0.001);
 
-const result = kmeans(data, k, max_iter, convergence_threshold);
-
-console.log(result);
+console.log(result.centroids);
+console.log(result.idxs);
 ```
 
-### K-means for RGB color quantization
+`kmeans(data, k, maxIter, convergenceThreshold?)` returns an object containing:
 
-To find the k-means centroids of an RGB u8 slice for color quantization:
+- `k`: the requested cluster count
+- `it`: the number of completed iterations
+- `centroids`: the calculated centroids
+- `idxs`: a `Uint32Array` mapping each input point to a centroid
+- `test`: a helper that assigns a new point to the nearest centroid
 
-```javascript
-import { kmeans_rgb } from 'kmeans-wasm';
+### RGB color quantization
 
-// Sample data - Uint8Array of RGB components, where each component is a u8 value
-const rgb_slice = new Uint8Array([255, 0, 0, 0, 255, 0, 0, 0, 255]);
+```js
+import { kmeans_rgb } from "kmeans-wasm";
 
-const k = 3; // Number of clusters
-const max_iter = 1000; // Maximum number of iterations
-const convergence_threshold = 0.001; // Convergence threshold
+const rgb = new Uint8Array([
+  255, 0, 0,
+  0, 255, 0,
+  0, 0, 255,
+]);
 
-const quantized_colors = kmeans_rgb(rgb_slice, k, max_iter, convergence_threshold);
-
-console.log(quantized_colors);
+const quantizedColors = kmeans_rgb(rgb, 3, 1_000, 0.001);
 ```
+
+`kmeans_rgb` returns a `Uint8Array` containing the RGB centroids.
+
+## Development
+
+Prerequisites:
+
+- Rust 1.86 or newer
+- Node.js 22.22.2+, 24.15.0+, or 26.0.0+
+- npm 12.1.0
+- Chrome or Chromium for browser tests
+
+Install the toolchain and dependencies:
+
+```sh
+rustup target add wasm32-unknown-unknown
+cargo install wasm-pack --version 0.15.0 --locked
+npm ci
+```
+
+Run the native, package, and TypeScript compatibility checks:
+
+```sh
+npm run check
+```
+
+Run the browser test suite separately:
+
+```sh
+npm run test:web
+```
+
+The release build is written to `pkg/`. Run `npm run package:check` to rebuild it and validate it with `publint` and Are the Types Wrong?.
+
+## Releases
+
+The npm package is released from GitHub Actions with npm trusted publishing (OIDC). No npm access token is stored in the repository. The workflow stages the package, and a maintainer must inspect it and approve publication with 2FA.
+
+A package maintainer must configure the trusted publisher once after this workflow is merged:
+
+```sh
+npm trust github kmeans-wasm \
+  --repo vusolapohvistr/kmeans-wasm \
+  --file publish.yml \
+  --env npm \
+  --allow-stage-publish
+```
+
+Then select **Require two-factor authentication and disallow tokens** in the package's npm publishing settings.
+
+To release:
+
+1. Set `package.version` in `Cargo.toml` to the new semantic version.
+2. Merge the version bump through CI.
+3. Publish a GitHub release whose tag is `vX.Y.Z` and matches the Cargo version.
+4. Inspect and approve the staged package:
+
+   ```sh
+   npm stage list kmeans-wasm
+   npm stage download <stage-id>
+   npm stage approve <stage-id>
+   ```
+
+Trusted publishing attaches npm provenance automatically. Reject a staged release with `npm stage reject <stage-id>` if manual inspection finds a problem.
 
 ## Comparison with skmeans
 
-You can test both libraries yourself on <https://ycatbink0t.github.io/kmeans-web-comparison/>
+You can compare both libraries at <https://ycatbink0t.github.io/kmeans-web-comparison/>.
 
 ## Contributing
 
-Pull requests and issues are welcome. Please make sure to add tests for any new features or bug fixes.
+Pull requests and issues are welcome. Add tests for new features and bug fixes.
 
 ## License
 
-MIT License
+[MIT](./LICENSE_MIT)

@@ -1,8 +1,9 @@
 /target
+/node_modules
 **/*.rs.bk
-Cargo.lock
 bin/
 pkg/
 wasm-pack.log
 .DS_Store
 kmeans-wasm-node
+*.tgz
