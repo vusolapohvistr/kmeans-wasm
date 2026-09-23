@@ -133,7 +133,7 @@ To release:
 
    Without `GITHUB_TOKEN`, `release-it` opens a prefilled GitHub Release page for manual confirmation. Set a repository-scoped `GITHUB_TOKEN` when automated GitHub Release creation is preferred.
 
-4. The `Stage npm release` workflow builds the package, verifies the tag/version match, and submits it to npm's staging queue. Inspect and approve it with 2FA:
+4. The `Stage npm release` workflow builds the package, verifies the tag/version match, and submits it to npm's staging queue (`latest` for stable releases, `next` for prereleases). Inspect and approve it with 2FA:
 
    ```sh
    npm stage list kmeans-wasm

@@ -66,7 +66,14 @@ jobs:
           fi
 
       - name: Stage package for 2FA approval
-        run: npm stage publish --tag latest ./pkg
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          dist_tag=latest
+          if [[ "${RELEASE_TAG}" == *-* ]]; then
+            dist_tag=next
+          fi
+          npm stage publish --tag "${dist_tag}" ./pkg
 
       - name: Explain approval step
         run: |
