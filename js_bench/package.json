@@ -2,7 +2,7 @@
   "name": "kmeans-wasm-benchmark",
   "version": "1.0.0",
   "private": true,
-  "description": "JavaScript benchmarks for kmeans-wasm.",
+  "description": "JavaScript benchmarks for the general and RGB kmeans-wasm APIs.",
   "license": "MIT",
   "packageManager": "npm@12.1.0",
   "devEngines": {
@@ -21,7 +21,8 @@
   "scripts": {
     "build": "npm run generate:wasm && tsc",
     "generate:wasm": "cd .. && wasm-pack build --release --target nodejs --out-dir kmeans-wasm-node && cd js_bench && npm install",
-    "start": "npm run build && node build/index.js",
+    "bench:rgb": "npm run build && node build/rgb.js",
+    "start": "npm run build && node build/index.js && node build/rgb.js",
     "test": "tsc --noEmit"
   },
   "dependencies": {
