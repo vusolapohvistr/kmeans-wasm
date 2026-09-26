@@ -27,17 +27,20 @@ WebAssembly build from that directory and uses `assets/blue-marble.jpg` as its s
 
 ## Benchmark
 
-The benchmark table in the repository README is a reference run. To reproduce it locally with the
+The benchmark tables in the repository README are reference runs. To reproduce them locally with the
 current Node.js/npm toolchain, run:
 
 ```sh
 npm ci
 npm run bench:rgb
+npm run bench:kmeans
 ```
 
-The command measures `kmeans_rgb` against `skmeans` on deterministic RGB point sets and prints
-both a terminal table and a Markdown table. The native Criterion benchmarks cover both packed color
-paths:
+The first command measures `kmeans_rgb` against `skmeans` on deterministic RGB point sets. The second
+measures the general `kmeans` API across point counts, dimensions, and cluster counts, and also
+reports `kmeans_rgb` on the three-dimensional cases so the cost of the generic array-based call is
+visible. Both print a terminal table and a Markdown table. The native Criterion benchmarks cover both
+packed color paths:
 
 ```sh
 cargo bench --bench kmeans_rgb

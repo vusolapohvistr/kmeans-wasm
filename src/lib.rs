@@ -230,9 +230,11 @@ pub fn kmeans(
 
     let result = kmeans_triangle::hamerly_kmeans(k, max_iter, convergence_threshold, data_vec);
 
-    let centroids_array = Array::new_with_length(result.centroids.len() as u32);
+    // `Array::new_with_length` would pre-fill the array with holes, so every
+    // pushed centroid would land after `k` empty slots.
+    let centroids_array = Array::new();
     for centroid in result.centroids.iter() {
-        let centroid_array = Array::new_with_length(centroid.len() as u32);
+        let centroid_array = Array::new();
         for value in centroid {
             centroid_array.push(&JsValue::from_f64(*value));
         }
@@ -267,13 +269,14 @@ pub fn kmeans(
         &Function::new_with_args(
             "point, fnDist",
             "
-        if (point.length !== this.centroids.length) {
+        const centroids = this.centroids;
+        if (centroids.length === 0 || point.length !== centroids[0].length) {
             throw new Error('Point should have the same length as centroid');
         }
 
         let minCentroid = 0;
-        let midDist = Number.MAX_VALUE;
-        let dist = fnDist ?? ((a, b) => {
+        let minDist = Number.MAX_VALUE;
+        const dist = fnDist ?? ((a, b) => {
             let result = 0;
             for (let i = 0; i < a.length; i++) {
                 result += (a[i] - b[i]) ** 2;
@@ -282,7 +285,7 @@ pub fn kmeans(
             return Math.sqrt(result);
         });
 
-        for (const [i, centroid] of this.centroids.entries()) {
+        for (const [i, centroid] of centroids.entries()) {
             const centroidDist = dist(centroid, point);
             if (centroidDist < minDist) {
                 minDist = centroidDist;
