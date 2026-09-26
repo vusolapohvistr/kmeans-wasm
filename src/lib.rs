@@ -50,15 +50,16 @@ fn quantize_packed_colors(
     max_iter: usize,
     convergence_threshold: f64,
 ) -> Vec<u8> {
-    let centroids = kmeans_triangle::hamerly_kmeans(
-        k,
-        max_iter,
-        convergence_threshold,
-        slice
-            .chunks_exact(components)
-            .map(|chunk| chunk.iter().map(|value| *value as f64).collect())
-            .collect(),
-    );
+    // One flat f64 buffer for the whole input, so the clustering core reads
+    // contiguous memory instead of chasing a vector per point. The explicit
+    // capacity lets this widening loop vectorize instead of growing per element.
+    let mut points = Vec::with_capacity(slice.len());
+    for value in slice.iter() {
+        points.push(*value as f64);
+    }
+
+    let centroids =
+        kmeans_triangle::hamerly_kmeans(k, max_iter, convergence_threshold, &points, components);
 
     centroids
         .centroids
@@ -228,7 +229,18 @@ pub fn kmeans(
         }
     }
 
-    let result = kmeans_triangle::hamerly_kmeans(k, max_iter, convergence_threshold, data_vec);
+    let dimension = data_vec.first().map_or(0, |first_point| first_point.len());
+    let point_count = data_vec.len();
+
+    // Flatten into one contiguous buffer for the clustering core. The rows were
+    // only needed to validate the shared dimension.
+    let mut points: Vec<f64> = Vec::with_capacity(point_count * dimension);
+    for point in &data_vec {
+        points.extend_from_slice(point);
+    }
+
+    let result =
+        kmeans_triangle::hamerly_kmeans(k, max_iter, convergence_threshold, &points, dimension);
 
     // `Array::new_with_length` would pre-fill the array with holes, so every
     // pushed centroid would land after `k` empty slots.
@@ -243,7 +255,7 @@ pub fn kmeans(
 
     let p_c = js_sys::Uint32Array::new_with_length(result.point_centroids.len() as u32);
     for (i, point_index) in result.point_centroids.iter().enumerate() {
-        p_c.set_index(i as u32, *point_index as u32);
+        p_c.set_index(i as u32, *point_index);
     }
 
     let result_js = Object::new();

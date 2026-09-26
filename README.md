@@ -149,16 +149,16 @@ The earlier 1,000-pixel example was too small to be representative: startup, inp
 
 ### Reference RGB results
 
-These are median wall times from a local Node.js 24.15.0 run using the release WebAssembly build, npm 12.1.0, two warm-ups, and eight measured runs. The browser playground shows the same table and is available at [vusolapohvistr.github.io/kmeans-wasm](https://vusolapohvistr.github.io/kmeans-wasm/).
+These are median wall times from a local Node.js 26.10.0 run on an AMD Ryzen 5 9600X, using the release WebAssembly build, npm 12.1.0, two warm-ups, and eight measured runs. Each cell is the median of five harness runs, because a single run on a shared machine is not reproducible to better than roughly 30%. The browser playground is available at [vusolapohvistr.github.io/kmeans-wasm](https://vusolapohvistr.github.io/kmeans-wasm/).
 
 | Test | Pixels | Colors | `kmeans_rgb` | `skmeans` | Speed-up |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| RGB random pixels | 1,000 | 2 | 0.20 ms | 1.07 ms | 5.3× |
-| RGB random pixels | 10,000 | 4 | 1.21 ms | 4.43 ms | 3.7× |
-| RGB random pixels | 10,000 | 16 | 3.54 ms | 8.94 ms | 2.5× |
-| RGB random pixels | 100,000 | 2 | 4.67 ms | 20.33 ms | 4.4× |
-| RGB random pixels | 100,000 | 8 | 19.24 ms | 51.99 ms | 2.7× |
-| RGB random pixels | 100,000 | 32 | 81.57 ms | 138.80 ms | 1.7× |
+| RGB random pixels | 1,000 | 2 | 0.15 ms | 0.33 ms | 2.1× |
+| RGB random pixels | 10,000 | 4 | 0.92 ms | 4.05 ms | 4.7× |
+| RGB random pixels | 10,000 | 16 | 2.30 ms | 8.37 ms | 3.5× |
+| RGB random pixels | 100,000 | 2 | 4.46 ms | 15.58 ms | 3.6× |
+| RGB random pixels | 100,000 | 8 | 14.29 ms | 57.24 ms | 3.6× |
+| RGB random pixels | 100,000 | 32 | 56.46 ms | 126.95 ms | 2.3× |
 
 `kmeans_rgb` is measured directly; `skmeans` receives the equivalent three-dimensional points. Results vary by CPU, browser, initialization, and convergence behavior. See the [reproducible benchmark harness](https://github.com/vusolapohvistr/kmeans-wasm/blob/main/js_bench/src/rgb.ts) for details. The package finalizer copies this README into `pkg/`, so the table is also visible on the npm package page.
 
@@ -168,14 +168,14 @@ These are median wall times from a local Node.js 26.10.0 run on an AMD Ryzen 5 9
 
 | Points | Dimensions | Clusters | `kmeans` | `kmeans_rgb` | `skmeans` | Speed-up | Packed speed-up |
 | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 1,000 | 3 | 2 | 0.38 ms | 0.07 ms | 0.54 ms | 1.4× | 5.4× |
-| 10,000 | 3 | 2 | 1.74 ms | 0.55 ms | 3.03 ms | 1.7× | 3.2× |
-| 10,000 | 3 | 10 | 3.15 ms | 2.52 ms | 13.27 ms | 4.2× | 1.3× |
-| 10,000 | 3 | 50 | 12.30 ms | 11.48 ms | 29.22 ms | 2.4× | 1.1× |
-| 100,000 | 3 | 10 | 37.10 ms | 24.98 ms | 134.53 ms | 3.6× | 1.5× |
-| 10,000 | 10 | 10 | 7.05 ms | — | 19.71 ms | 2.8× | — |
-| 10,000 | 50 | 10 | 26.75 ms | — | 56.57 ms | 2.1× | — |
-| 10,000 | 50 | 50 | 47.68 ms | — | 109.81 ms | 2.3× | — |
+| 1,000 | 3 | 2 | 0.34 ms | 0.07 ms | 0.69 ms | 2.0× | 5.0× |
+| 10,000 | 3 | 2 | 1.74 ms | 0.44 ms | 2.77 ms | 1.6× | 3.9× |
+| 10,000 | 3 | 10 | 2.80 ms | 1.60 ms | 15.31 ms | 5.0× | 2.0× |
+| 10,000 | 3 | 50 | 9.21 ms | 8.26 ms | 33.20 ms | 3.5× | 1.1× |
+| 100,000 | 3 | 10 | 26.00 ms | 15.08 ms | 132.27 ms | 5.2× | 1.7× |
+| 10,000 | 10 | 10 | 6.09 ms | — | 18.68 ms | 3.1× | — |
+| 10,000 | 50 | 10 | 21.41 ms | — | 60.57 ms | 2.9× | — |
+| 10,000 | 50 | 50 | 36.68 ms | — | 114.21 ms | 3.2× | — |
 
 `Speed-up` is `skmeans` divided by `kmeans`. `Packed speed-up` is `kmeans` divided by `kmeans_rgb` on the same three-dimensional points, and is shown only where the packed three-component API applies. All three columns measure the same clustering problem; the general `kmeans` call has to copy each point across the JavaScript boundary, while `kmeans_rgb` receives one packed `Uint8Array`.
 
