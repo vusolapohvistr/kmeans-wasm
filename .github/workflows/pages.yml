@@ -12,7 +12,7 @@ on:
       - "package.json"
       - "package-lock.json"
       - "README.md"
-      - "js_bench/src/rgb.ts"
+      - "js_bench/src/**"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
 

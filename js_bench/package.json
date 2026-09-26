@@ -22,7 +22,8 @@
     "build": "npm run generate:wasm && tsc",
     "generate:wasm": "cd .. && wasm-pack build --release --target nodejs --out-dir kmeans-wasm-node && cd js_bench && npm install",
     "bench:rgb": "npm run build && node build/rgb.js",
-    "start": "npm run build && node build/index.js && node build/rgb.js",
+    "bench:kmeans": "npm run build && node build/vector.js",
+    "start": "npm run build && node build/vector.js && node build/rgb.js",
     "test": "tsc --noEmit"
   },
   "dependencies": {

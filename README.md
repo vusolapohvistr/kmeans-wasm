@@ -136,7 +136,14 @@ npm ci
 npm run bench:rgb
 ```
 
-The benchmark uses deterministic RGB point sets, reports median wall time, and prints a table suitable for updating the page. The Rust Criterion benchmarks are also available with `cargo bench --bench kmeans_rgb` and `cargo bench --bench kmeans_rgba`.
+Run the general vector-space comparison the same way:
+
+```sh
+npm ci
+npm run bench:kmeans
+```
+
+Both benchmarks use deterministic point sets, report median wall time, and print a table suitable for updating this README. The Rust Criterion benchmarks are also available with `cargo bench --bench kmeans_rgb` and `cargo bench --bench kmeans_rgba`.
 
 The earlier 1,000-pixel example was too small to be representative: startup, input conversion, and measurement noise dominated the result. The native benchmark now pre-generates its input and tests 10k, 100k, and 409,600 pixels; the JavaScript benchmark rebuilds the WASM artifact before every benchmark run. The single-image comparison page reports the browser clustering time for all three implementations and shows what the extra alpha component of `kmeans_rgba` costs next to `kmeans_rgb`.
 
@@ -154,6 +161,25 @@ These are median wall times from a local Node.js 24.15.0 run using the release W
 | RGB random pixels | 100,000 | 32 | 81.57 ms | 138.80 ms | 1.7× |
 
 `kmeans_rgb` is measured directly; `skmeans` receives the equivalent three-dimensional points. Results vary by CPU, browser, initialization, and convergence behavior. See the [reproducible benchmark harness](https://github.com/vusolapohvistr/kmeans-wasm/blob/main/js_bench/src/rgb.ts) for details. The package finalizer copies this README into `pkg/`, so the table is also visible on the npm package page.
+
+### Reference general vector-space results
+
+These are median wall times from a local Node.js 26.10.0 run on an AMD Ryzen 5 9600X, using the release WebAssembly build and npm 12.1.0. Each cell is the median of five harness runs, and every harness run is itself a median of eight measured runs after two warm-ups, with 100 maximum iterations and a 0.1 convergence threshold. Every point is a deterministic pseudo-random vector of `u8`-range values.
+
+| Points | Dimensions | Clusters | `kmeans` | `kmeans_rgb` | `skmeans` | Speed-up | Packed speed-up |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1,000 | 3 | 2 | 0.38 ms | 0.07 ms | 0.54 ms | 1.4× | 5.4× |
+| 10,000 | 3 | 2 | 1.74 ms | 0.55 ms | 3.03 ms | 1.7× | 3.2× |
+| 10,000 | 3 | 10 | 3.15 ms | 2.52 ms | 13.27 ms | 4.2× | 1.3× |
+| 10,000 | 3 | 50 | 12.30 ms | 11.48 ms | 29.22 ms | 2.4× | 1.1× |
+| 100,000 | 3 | 10 | 37.10 ms | 24.98 ms | 134.53 ms | 3.6× | 1.5× |
+| 10,000 | 10 | 10 | 7.05 ms | — | 19.71 ms | 2.8× | — |
+| 10,000 | 50 | 10 | 26.75 ms | — | 56.57 ms | 2.1× | — |
+| 10,000 | 50 | 50 | 47.68 ms | — | 109.81 ms | 2.3× | — |
+
+`Speed-up` is `skmeans` divided by `kmeans`. `Packed speed-up` is `kmeans` divided by `kmeans_rgb` on the same three-dimensional points, and is shown only where the packed three-component API applies. All three columns measure the same clustering problem; the general `kmeans` call has to copy each point across the JavaScript boundary, while `kmeans_rgb` receives one packed `Uint8Array`.
+
+That interop cost is fixed per point, so it dominates the small cases and shrinks as the cluster count grows. It is also why the playground page only benchmarks the packed color paths: converting a 480px preview into one array of point arrays costs more than the clustering itself. Prefer `kmeans_rgb` or `kmeans_rgba` for three- and four-component data, and reserve `kmeans` for genuinely arbitrary dimensions. Results vary by CPU, runtime, initialization, and convergence behavior; the smallest rows are the noisiest because fixed overhead is a large share of them. See the [reproducible benchmark harness](https://github.com/vusolapohvistr/kmeans-wasm/blob/main/js_bench/src/vector.ts) for details.
 
 ## Releases
 

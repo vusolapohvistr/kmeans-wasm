@@ -60,13 +60,18 @@ jobs:
         run: npm run package:check
 
       - name: Verify npm README benchmark table
-        run: grep -q "Reference RGB results" pkg/README.md
+        run: |
+          grep -q "Reference RGB results" pkg/README.md
+          grep -q "Reference general vector-space results" pkg/README.md
 
       - name: Build GitHub Pages bundle
         run: npm run pages:build
 
       - name: Run JavaScript RGB benchmark harness
         run: npm run bench:rgb
+
+      - name: Run JavaScript vector-space benchmark harness
+        run: npm run bench:kmeans
 
       - name: Audit JavaScript tooling
         run: npm audit --audit-level=high
