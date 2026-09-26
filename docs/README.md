@@ -1,10 +1,16 @@
-# RGB colorization playground
+# RGB and RGBA colorization playground
 
 This directory contains a small GitHub Pages comparison for `kmeans-wasm`.
 
-The page loads one public-domain Blue Marble image and renders two 16-color results: the dedicated
-`kmeans_rgb` WebAssembly method and the MIT-licensed `skmeans` browser bundle. It deliberately does
-not include a larger application UI or image-upload controls.
+The page loads one public-domain Blue Marble image and renders three 16-color results: the packed
+`kmeans_rgb` WebAssembly method, the four-component `kmeans_rgba` WebAssembly method, and the
+MIT-licensed `skmeans` browser bundle. It also reports a median speed comparison between the three
+implementations. It deliberately does not include a larger application UI or image-upload controls.
+
+`kmeans_rgba` clusters `ImageData.data` directly, so the page passes the canvas pixels straight from
+`getImageData` to WebAssembly without repacking them. The demo image is fully opaque, so its palette
+matches the `kmeans_rgb` one; the extra time it reports is the cost of clustering the alpha channel as
+a fourth component.
 
 ## Local preview
 
@@ -30,7 +36,13 @@ npm run bench:rgb
 ```
 
 The command measures `kmeans_rgb` against `skmeans` on deterministic RGB point sets and prints
-both a terminal table and a Markdown table.
+both a terminal table and a Markdown table. The native Criterion benchmarks cover both packed color
+paths:
+
+```sh
+cargo bench --bench kmeans_rgb
+cargo bench --bench kmeans_rgba
+```
 
 ## Deployment
 

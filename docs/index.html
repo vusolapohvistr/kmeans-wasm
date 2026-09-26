@@ -5,19 +5,20 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta
       name="description"
-      content="A small RGB color-quantization comparison for kmeans-wasm and skmeans."
+      content="A small RGB and RGBA color-quantization comparison for kmeans-wasm and skmeans."
     />
-    <title>kmeans-wasm · RGB comparison</title>
+    <title>kmeans-wasm · RGB and RGBA comparison</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
     <main class="page">
       <header class="header">
-        <p class="eyebrow">kmeans-wasm · RGB color quantization</p>
-        <h1>One image, two implementations.</h1>
+        <p class="eyebrow">kmeans-wasm · RGB and RGBA color quantization</p>
+        <h1>One image, three implementations.</h1>
         <p class="intro">
-          The same public-domain image and 16-color palette, clustered in the browser with the
-          dedicated <code>kmeans_rgb</code> method and with <code>skmeans</code>.
+          The same public-domain image and 16-color palette, clustered in the browser with the packed
+          <code>kmeans_rgb</code> method, the new <code>kmeans_rgba</code> method that also clusters
+          alpha, and with <code>skmeans</code>.
         </p>
         <a class="github-link" href="https://github.com/vusolapohvistr/kmeans-wasm" rel="noreferrer">GitHub ↗</a>
       </header>
@@ -34,8 +35,12 @@
             <figcaption>Original</figcaption>
           </figure>
           <figure class="image-card">
-            <canvas id="wasm-canvas" aria-label="Image clustered with kmeans-wasm"></canvas>
-            <figcaption><code>kmeans_rgb</code> · <span id="wasm-time">—</span></figcaption>
+            <canvas id="rgb-canvas" aria-label="Image clustered with kmeans_rgb"></canvas>
+            <figcaption><code>kmeans_rgb</code> · <span id="rgb-time">—</span></figcaption>
+          </figure>
+          <figure class="image-card">
+            <canvas id="rgba-canvas" aria-label="Image clustered with kmeans_rgba"></canvas>
+            <figcaption><code>kmeans_rgba</code> · <span id="rgba-time">—</span></figcaption>
           </figure>
           <figure class="image-card">
             <canvas id="skmeans-canvas" aria-label="Image clustered with skmeans"></canvas>
@@ -43,9 +48,49 @@
           </figure>
         </div>
 
+        <div class="timing" aria-labelledby="timing-title">
+          <h3 id="timing-title">Speed comparison</h3>
+          <table class="timing-table">
+            <thead>
+              <tr>
+                <th scope="col">Method</th>
+                <th scope="col">Input</th>
+                <th scope="col">Time</th>
+                <th scope="col">vs <code>kmeans_rgb</code></th>
+              </tr>
+            </thead>
+            <tbody id="timing-rows">
+              <tr class="pending">
+                <td><code>kmeans_rgb</code></td>
+                <td>3 × <code>u8</code></td>
+                <td>—</td>
+                <td>—</td>
+              </tr>
+              <tr class="pending">
+                <td><code>kmeans_rgba</code></td>
+                <td>4 × <code>u8</code></td>
+                <td>—</td>
+                <td>—</td>
+              </tr>
+              <tr class="pending">
+                <td><code>skmeans</code></td>
+                <td>3 × <code>number</code></td>
+                <td>—</td>
+                <td>—</td>
+              </tr>
+            </tbody>
+          </table>
+          <p class="timing-note" id="timing-note">
+            Clustering only, median of three runs after one warm-up, identical initialization.
+            <code>kmeans_rgba</code> measures four components per pixel, so it also pays for the
+            alpha channel even though this JPEG is fully opaque.
+          </p>
+        </div>
+
         <div class="details">
           <span><strong>Source</strong><span id="source-size">—</span></span>
           <span><strong>Palette</strong> 16 colors</span>
+          <span><strong>Iterations</strong> ≤ 30</span>
           <span><strong>Processing</strong> local browser only</span>
         </div>
       </section>

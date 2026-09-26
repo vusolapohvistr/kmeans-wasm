@@ -3,6 +3,70 @@ mod kmeans_triangle;
 use js_sys::{Array, Function, Object, Reflect};
 use wasm_bindgen::{JsCast, prelude::*};
 
+/// Number of vector components clustered by [`kmeans_rgb`].
+const RGB_COMPONENTS: usize = 3;
+/// Number of vector components clustered by [`kmeans_rgba`].
+const RGBA_COMPONENTS: usize = 4;
+
+fn validate_arguments(
+    slice_name: &str,
+    slice_len: usize,
+    components: usize,
+    k: usize,
+    max_iter: usize,
+    convergence_threshold: f64,
+) -> Result<(), JsValue> {
+    if k < 2 {
+        return Err(JsValue::from_str(
+            "Error: k must be greater than or equal to 2.",
+        ));
+    }
+
+    if max_iter < 1 {
+        return Err(JsValue::from_str(
+            "Error: max_iter must be greater than or equal to 1.",
+        ));
+    }
+
+    if convergence_threshold.is_sign_negative() {
+        return Err(JsValue::from_str(
+            "Error: convergence_threshold must be positive",
+        ));
+    }
+
+    if slice_len % components != 0 {
+        return Err(JsValue::from_str(&format!(
+            "Error: The length of {slice_name} must be a multiple of {components}."
+        )));
+    }
+
+    Ok(())
+}
+
+fn quantize_packed_colors(
+    slice: Vec<u8>,
+    components: usize,
+    k: usize,
+    max_iter: usize,
+    convergence_threshold: f64,
+) -> Vec<u8> {
+    let centroids = kmeans_triangle::hamerly_kmeans(
+        k,
+        max_iter,
+        convergence_threshold,
+        slice
+            .chunks_exact(components)
+            .map(|chunk| chunk.iter().map(|value| *value as f64).collect())
+            .collect(),
+    );
+
+    centroids
+        .centroids
+        .iter()
+        .flat_map(|centroid| centroid.iter().map(|value| *value as u8))
+        .collect()
+}
+
 #[wasm_bindgen]
 /// Find the k-means centroids of an RGB u8 slice for color quantization.
 ///
@@ -20,47 +84,63 @@ pub fn kmeans_rgb(
     max_iter: usize,
     convergence_threshold: Option<f64>,
 ) -> Result<Vec<u8>, JsValue> {
-    if k < 2 {
-        return Err(JsValue::from_str(
-            "Error: k must be greater than or equal to 2.",
-        ));
-    }
-
-    if max_iter < 1 {
-        return Err(JsValue::from_str(
-            "Error: max_iter must be greater than or equal to 1.",
-        ));
-    }
-
     let convergence_threshold = convergence_threshold.unwrap_or(0.0);
 
-    if convergence_threshold.is_sign_negative() {
-        return Err(JsValue::from_str(
-            "Error: convergence_threshold must be positive",
-        ));
-    }
-
-    if rgb_slice.len() % 3 != 0 {
-        return Err(JsValue::from_str(
-            "Error: The length of rgb_slice must be a multiple of 3.",
-        ));
-    }
-
-    let centroids = kmeans_triangle::hamerly_kmeans(
+    validate_arguments(
+        "rgb_slice",
+        rgb_slice.len(),
+        RGB_COMPONENTS,
         k,
         max_iter,
         convergence_threshold,
-        rgb_slice
-            .chunks_exact(3)
-            .map(|x| vec![x[0] as f64, x[1] as f64, x[2] as f64])
-            .collect(),
-    );
+    )?;
 
-    Ok(centroids
-        .centroids
-        .iter()
-        .flat_map(|centroid| [centroid[0] as u8, centroid[1] as u8, centroid[2] as u8])
-        .collect())
+    Ok(quantize_packed_colors(
+        rgb_slice,
+        RGB_COMPONENTS,
+        k,
+        max_iter,
+        convergence_threshold,
+    ))
+}
+
+#[wasm_bindgen]
+/// Find the k-means centroids of an RGBA u8 slice for color quantization.
+///
+/// - `rgba_slice` - Uint8Array of RGBA components, where each component is a u8 value.
+/// - `k >= 2` - number of clusters.
+/// - `max_iter >= 1` - maximum number of iterations.
+/// - `convergence_threshold > 0.0` - the threshold to determine when the centroids have converged.
+///
+/// This function is the four-component counterpart of `kmeans_rgb`. It is the drop-in choice for
+/// `ImageData.data` and other buffers that interleave red, green, blue, and alpha, so no repacking
+/// is needed before clustering. The alpha channel is clustered like any other component, which makes
+/// the function useful for image data that mixes transparent and opaque pixels. The resulting
+/// centroids represent the quantized RGBA colors.
+pub fn kmeans_rgba(
+    rgba_slice: Vec<u8>,
+    k: usize,
+    max_iter: usize,
+    convergence_threshold: Option<f64>,
+) -> Result<Vec<u8>, JsValue> {
+    let convergence_threshold = convergence_threshold.unwrap_or(0.0);
+
+    validate_arguments(
+        "rgba_slice",
+        rgba_slice.len(),
+        RGBA_COMPONENTS,
+        k,
+        max_iter,
+        convergence_threshold,
+    )?;
+
+    Ok(quantize_packed_colors(
+        rgba_slice,
+        RGBA_COMPONENTS,
+        k,
+        max_iter,
+        convergence_threshold,
+    ))
 }
 
 #[wasm_bindgen(typescript_custom_section)]

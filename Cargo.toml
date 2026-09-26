@@ -37,6 +37,10 @@ codegen-units = 1
 name = "kmeans_rgb"
 harness = false
 
+[[bench]]
+name = "kmeans_rgba"
+harness = false
+
 [package.metadata.wasm-pack.profile.dev]
 wasm-opt = ["--enable-simd", "--enable-bulk-memory", "--enable-reference-types", "--enable-sign-ext", "--enable-nontrapping-float-to-int"]
 

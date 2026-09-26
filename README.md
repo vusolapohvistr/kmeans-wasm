@@ -7,7 +7,7 @@ Version 3 uses WebAssembly SIMD (`simd128`) for performance. Use a runtime with 
 ## Features
 
 - Hamerly k-means algorithm
-- RGB color quantization
+- RGB and RGBA color quantization
 - Arbitrary numeric vector spaces
 - JavaScript and TypeScript bindings
 - ES module package with a documented `exports` entry point
@@ -64,6 +64,26 @@ const quantizedColors = kmeans_rgb(rgb, 3, 1_000, 0.001);
 
 `kmeans_rgb` returns a `Uint8Array` containing the RGB centroids.
 
+### RGBA color quantization
+
+```js
+import { kmeans_rgba } from "kmeans-wasm";
+
+const rgba = new Uint8Array([
+  255, 0, 0, 255,
+  0, 255, 0, 255,
+  0, 0, 255, 128,
+]);
+
+const quantizedColors = kmeans_rgba(rgba, 3, 1_000, 0.001);
+```
+
+`kmeans_rgba` mirrors `kmeans_rgb` for four-component vectors and returns a `Uint8Array` containing
+the RGBA centroids. It is the drop-in choice for `ImageData.data` and other buffers that interleave
+red, green, blue, and alpha, because no repacking is needed before clustering. The alpha channel is
+clustered like any other component, so the function also works for data that mixes transparent and
+opaque pixels.
+
 ## Development
 
 Prerequisites:
@@ -97,7 +117,7 @@ The release build is written to `pkg/`. Run `npm run package:check` to rebuild i
 
 ## Browser playground
 
-The [GitHub Pages comparison](https://vusolapohvistr.github.io/kmeans-wasm/) shows one public-domain Blue Marble image clustered with both `kmeans_rgb` and `skmeans`. It builds the browser WebAssembly package into the ignored `docs/wasm/` directory:
+The [GitHub Pages comparison](https://vusolapohvistr.github.io/kmeans-wasm/) shows one public-domain Blue Marble image clustered with `kmeans_rgb`, with `kmeans_rgba`, and with `skmeans`, and reports the measured time of each implementation. It builds the browser WebAssembly package into the ignored `docs/wasm/` directory:
 
 ```sh
 npm ci
@@ -116,9 +136,9 @@ npm ci
 npm run bench:rgb
 ```
 
-The benchmark uses deterministic RGB point sets, reports median wall time, and prints a table suitable for updating the page. The Rust Criterion benchmark is also available with `cargo bench --bench kmeans_rgb`.
+The benchmark uses deterministic RGB point sets, reports median wall time, and prints a table suitable for updating the page. The Rust Criterion benchmarks are also available with `cargo bench --bench kmeans_rgb` and `cargo bench --bench kmeans_rgba`.
 
-The earlier 1,000-pixel example was too small to be representative: startup, input conversion, and measurement noise dominated the result. The native benchmark now pre-generates its input and tests 10k, 100k, and 409,600 pixels; the JavaScript benchmark rebuilds the WASM artifact before every benchmark run. The single-image comparison page reports the browser clustering time for both implementations.
+The earlier 1,000-pixel example was too small to be representative: startup, input conversion, and measurement noise dominated the result. The native benchmark now pre-generates its input and tests 10k, 100k, and 409,600 pixels; the JavaScript benchmark rebuilds the WASM artifact before every benchmark run. The single-image comparison page reports the browser clustering time for all three implementations and shows what the extra alpha component of `kmeans_rgba` costs next to `kmeans_rgb`.
 
 ### Reference RGB results
 
