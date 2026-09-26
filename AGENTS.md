@@ -48,6 +48,7 @@ npm run build          # wasm-pack -> pkg/ + finalize-npm-package.mjs
 npm run pages:build    # wasm-pack --target web -> docs/wasm/
 npm run bench:rgb      # rebuilds the node target, then runs js_bench/src/rgb.ts
 npm run bench:kmeans   # same for the general API harness
+npm run test:page      # runs docs/app.js headless and checks what it painted
 npm run release:dry    # release-it dry run
 ```
 
@@ -313,5 +314,28 @@ an npm granular access token with **Read and write (stage only)** permissions fo
   by running `docs/app.js` under a headless DOM harness. Keep that harness idea
   in mind: shim `document`, `Image` and `getContext`, stub `fetch` for `file:`
   URLs so the wasm-pack web glue can load, then import `docs/app.js` directly.
-- `docs/app.js` has no automated coverage. A regression there is only visible on
-  the deployed page.
+
+## The playground page has a test now
+
+`npm run test:page` runs `scripts/check-page.mjs`, which imports `docs/app.js`
+under a minimal DOM and asserts on what actually got painted. It needs
+`npm run pages:build` first, since it loads `docs/wasm`. It is part of
+`npm run check` and runs as its own step in CI.
+
+It exists because of a bug that reached the deployed page. The page built its
+RGBA buffer with `new Uint8Array(imageData.buffer, imageData.byteOffset,
+imageData.length)`. A real `ImageData` has only `data`, `width`, `height` and
+`colorSpace`; `buffer`, `byteOffset` and `length` live on the
+`Uint8ClampedArray` at `imageData.data`. So the buffer was **empty**,
+`kmeans_rgba` returned an empty palette in about three microseconds, and all
+three result canvases rendered solid black while the page still cheerfully
+reported "All three results ready." The source canvas was fine, because
+`drawImage` never touches that buffer.
+
+The lesson worth keeping: a hand-written stub that is *more* capable than the
+real thing hides the bug rather than catching it. The first version of this
+harness gave its fake `ImageData` `buffer`, `byteOffset` and `length` getters,
+which is exactly the wrong assumption, and the test passed against broken code.
+The stub is now deliberately faithful, and the assertions check the painted
+output rather than just the status text, because a zero-duration timing and a
+black canvas are the actual symptoms.

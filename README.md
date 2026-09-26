@@ -180,7 +180,8 @@ you normally want for interactive work.
 
 Both reference tables below come from the release WebAssembly build, measured
 locally on Node.js 26.10.0 over an AMD Ryzen 5 9600X, as the median of five runs
-of the harness. Results vary by CPU, runtime, initialization, and convergence
+of the harness. The distance kernel is SIMD accelerated, so these numbers
+include that. Results vary by CPU, runtime, initialization, and convergence
 behavior, and the smallest rows are the noisiest because fixed overhead is a
 large share of them.
 
@@ -191,12 +192,12 @@ maximum iterations.
 
 | Test | Pixels | Colors | `kmeans_rgb` | `skmeans` | Speed-up |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| RGB random pixels | 1,000 | 2 | 0.15 ms | 0.33 ms | 2.1× |
-| RGB random pixels | 10,000 | 4 | 0.92 ms | 4.05 ms | 4.7× |
-| RGB random pixels | 10,000 | 16 | 2.30 ms | 8.37 ms | 3.5× |
-| RGB random pixels | 100,000 | 2 | 4.46 ms | 15.58 ms | 3.6× |
-| RGB random pixels | 100,000 | 8 | 14.29 ms | 57.24 ms | 3.6× |
-| RGB random pixels | 100,000 | 32 | 56.46 ms | 126.95 ms | 2.3× |
+| RGB random pixels | 1,000 | 2 | 0.15 ms | 0.26 ms | 1.7× |
+| RGB random pixels | 10,000 | 4 | 0.73 ms | 3.83 ms | 5.3× |
+| RGB random pixels | 10,000 | 16 | 2.24 ms | 9.34 ms | 3.7× |
+| RGB random pixels | 100,000 | 2 | 4.23 ms | 16.26 ms | 3.6× |
+| RGB random pixels | 100,000 | 8 | 12.66 ms | 66.60 ms | 4.4× |
+| RGB random pixels | 100,000 | 32 | 45.62 ms | 128.36 ms | 2.8× |
 
 ### Reference general vector-space results
 
@@ -204,14 +205,14 @@ Same measurement setup, over points of varying dimension and cluster count.
 
 | Points | Dimensions | Clusters | `kmeans` | `kmeans_rgb` | `skmeans` | Speed-up | Packed speed-up |
 | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 1,000 | 3 | 2 | 0.34 ms | 0.07 ms | 0.69 ms | 2.0× | 5.0× |
-| 10,000 | 3 | 2 | 1.74 ms | 0.44 ms | 2.77 ms | 1.6× | 3.9× |
-| 10,000 | 3 | 10 | 2.80 ms | 1.60 ms | 15.31 ms | 5.0× | 2.0× |
-| 10,000 | 3 | 50 | 9.21 ms | 8.26 ms | 33.20 ms | 3.5× | 1.1× |
-| 100,000 | 3 | 10 | 26.00 ms | 15.08 ms | 132.27 ms | 5.2× | 1.7× |
-| 10,000 | 10 | 10 | 6.09 ms | — | 18.68 ms | 3.1× | — |
-| 10,000 | 50 | 10 | 21.41 ms | — | 60.57 ms | 2.9× | — |
-| 10,000 | 50 | 50 | 36.68 ms | — | 114.21 ms | 3.2× | — |
+| 1,000 | 3 | 2 | 0.36 ms | 0.07 ms | 0.39 ms | 1.1× | 5.0× |
+| 10,000 | 3 | 2 | 1.67 ms | 0.43 ms | 2.52 ms | 1.6× | 3.9× |
+| 10,000 | 3 | 10 | 2.69 ms | 1.23 ms | 14.63 ms | 5.6× | 2.2× |
+| 10,000 | 3 | 50 | 7.74 ms | 6.71 ms | 33.65 ms | 4.3× | 1.2× |
+| 100,000 | 3 | 10 | 26.21 ms | 14.49 ms | 131.60 ms | 4.7× | 1.8× |
+| 10,000 | 10 | 10 | 5.67 ms | — | 18.87 ms | 3.5× | — |
+| 10,000 | 50 | 10 | 19.05 ms | — | 62.19 ms | 3.1× | — |
+| 10,000 | 50 | 50 | 29.66 ms | — | 112.22 ms | 3.8× | — |
 
 `Speed-up` is `skmeans` divided by `kmeans`. `Packed speed-up` is `kmeans` divided by `kmeans_rgb` on the same three-dimensional points, and is shown only where the packed three-component API applies.
 
