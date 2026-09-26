@@ -6,6 +6,7 @@
   --text: #f2f5fb;
   --muted: #a2adbf;
   --accent: #9bf6c4;
+  --blue: #7fc8ff;
   --purple: #b2a7ff;
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   background: var(--background);
@@ -118,7 +119,7 @@ h2 {
 
 .image-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 14px;
 }
 
@@ -148,7 +149,72 @@ figcaption code {
 }
 
 .image-card:nth-child(3) figcaption code {
+  color: var(--blue);
+}
+
+.image-card:nth-child(4) figcaption code {
   color: var(--purple);
+}
+
+.timing {
+  margin-top: 22px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
+}
+
+.timing h3 {
+  margin-bottom: 12px;
+  font-size: 0.95rem;
+  letter-spacing: -0.02em;
+}
+
+.timing-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.timing-table th,
+.timing-table td {
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+}
+
+.timing-table th {
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.timing-table td.method,
+.timing-table td.input,
+.timing-table td.time,
+.timing-table td.ratio {
+  font-family: "SFMono-Regular", Consolas, monospace;
+}
+
+.timing-table td.time,
+.timing-table td.ratio,
+.timing-table th:nth-child(n + 3) {
+  text-align: right;
+}
+
+.timing-table td.ratio {
+  color: var(--accent);
+}
+
+.timing-table tr.pending td {
+  color: var(--muted);
+}
+
+.timing-note {
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: 0.72rem;
 }
 
 .details {
@@ -184,6 +250,12 @@ footer a {
   text-decoration: none;
 }
 
+@media (max-width: 1100px) {
+  .image-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 800px) {
   .page {
     width: min(100% - 24px, 1320px);
@@ -206,6 +278,11 @@ footer a {
   #status {
     margin-top: 8px;
     text-align: left;
+  }
+
+  .timing-table th:nth-child(2),
+  .timing-table td.input {
+    display: none;
   }
 
   footer span,
