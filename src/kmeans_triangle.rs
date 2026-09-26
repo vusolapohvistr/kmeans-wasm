@@ -1,7 +1,58 @@
+use fearless_simd::{Level, Simd, SimdBase, dispatch, f64x2};
+
 pub struct HamerlyKmeansResult {
-    pub centroids: Vec<Vec<f64>>,
+    /// Flat row-major centroids, `k * dimensions` values.
+    pub centroids: Vec<f64>,
+    pub dimensions: usize,
     pub iterations: usize,
-    pub point_centroids: Vec<u32>,
+    point_states: Vec<PointState>,
+}
+
+impl HamerlyKmeansResult {
+    /// One array per cluster, as the general `kmeans` API returns it.
+    ///
+    /// The packed color paths never need this shape, so it is built on demand
+    /// rather than on every clustering run.
+    pub fn centroid_rows(&self) -> Vec<Vec<f64>> {
+        self.centroids
+            .chunks_exact(self.dimensions)
+            .map(<[f64]>::to_vec)
+            .collect()
+    }
+
+    /// The cluster index of every point, as the general `kmeans` API returns it.
+    ///
+    /// Skipped by the packed color paths, which only want the palette.
+    pub fn assignments(&self) -> Vec<u32> {
+        self.point_states
+            .iter()
+            .map(|state| state.centroid)
+            .collect()
+    }
+}
+
+/// Runs the clustering once, at the strongest SIMD level this build supports.
+///
+/// The package is compiled with `simd128` required, so the level is a compile
+/// time constant and there is nothing to detect at runtime. Selecting it here
+/// means the level check happens once per clustering run rather than once per
+/// distance evaluation.
+pub fn hamerly_kmeans_dispatched(
+    k: usize,
+    max_iter: usize,
+    convergence_threshold: f64,
+    points: &[f64],
+    dimensions: usize,
+) -> HamerlyKmeansResult {
+    let level = Level::baseline();
+    dispatch!(level, simd => hamerly_kmeans(
+        simd,
+        k,
+        max_iter,
+        convergence_threshold,
+        points,
+        dimensions
+    ))
 }
 
 /// Cluster `points`, stored as a flat row-major buffer of `dimensions` components
@@ -10,7 +61,12 @@ pub struct HamerlyKmeansResult {
 /// A flat buffer keeps every point and every centroid in one contiguous
 /// allocation, so the distance loops below stream memory instead of chasing a
 /// pointer per point.
-pub fn hamerly_kmeans(
+///
+/// The distance kernel is generic over the SIMD level, so the caller selects
+/// the level once with `dispatch!` instead of paying for a level check on every
+/// one of the millions of distance evaluations.
+pub fn hamerly_kmeans<S: Simd>(
+    simd: S,
     k: usize,
     max_iter: usize,
     convergence_threshold: f64,
@@ -22,8 +78,9 @@ pub fn hamerly_kmeans(
     if point_count == 0 {
         return HamerlyKmeansResult {
             centroids: Vec::new(),
+            dimensions,
             iterations: 0,
-            point_centroids: Vec::new(),
+            point_states: Vec::new(),
         };
     }
 
@@ -33,7 +90,7 @@ pub fn hamerly_kmeans(
         mut centroid_points_counts,
         mut centroid_points_sum,
         mut point_states,
-    } = initialize(&centroids, points, dimensions, point_count);
+    } = initialize(simd, &centroids, points, dimensions, point_count);
 
     let mut centroid_closest_centroid_distance = vec![f64::MAX; k];
     let mut centroid_distance_to_previous_position = vec![f64::MAX; k];
@@ -42,6 +99,7 @@ pub fn hamerly_kmeans(
     while iterations < max_iter {
         for (j, slot) in centroid_closest_centroid_distance.iter_mut().enumerate() {
             *slot = get_min_centroid_skip_point_centroid(
+                simd,
                 &centroids[j * dimensions..(j + 1) * dimensions],
                 &centroids,
                 dimensions,
@@ -60,6 +118,7 @@ pub fn hamerly_kmeans(
             if state.upper_bound > m {
                 let current = state.centroid as usize;
                 let current_distance_squared = get_distance_squared(
+                    simd,
                     &points[point_offset..],
                     &centroids,
                     dimensions,
@@ -69,6 +128,7 @@ pub fn hamerly_kmeans(
                 if state.upper_bound > m {
                     let previous_point_centroid = state.centroid;
                     point_all_centers(
+                        simd,
                         &points[point_offset..],
                         &centroids,
                         dimensions,
@@ -109,12 +169,10 @@ pub fn hamerly_kmeans(
     }
 
     HamerlyKmeansResult {
-        centroids: centroids
-            .chunks_exact(dimensions)
-            .map(<[f64]>::to_vec)
-            .collect(),
+        centroids,
+        dimensions,
         iterations,
-        point_centroids: point_states.iter().map(|state| state.centroid).collect(),
+        point_states,
     }
 }
 
@@ -136,21 +194,13 @@ fn update_bounds(
         .unwrap()
         .0;
 
-    let r_moved = centroid_distance_to_previous_position[r];
-    let r_another_moved = centroid_distance_to_previous_position[r_another];
-
-    // The two cases used to be a branch per point. Splitting the pass keeps the
-    // inner loop straight-line, and the arithmetic applied to each point is
-    // unchanged.
     for state in point_states.iter_mut() {
         state.upper_bound += centroid_distance_to_previous_position[state.centroid as usize];
-    }
-    for state in point_states.iter_mut() {
-        state.lower_bound -= if state.centroid as usize == r {
-            r_another_moved
+        if state.centroid as usize == r {
+            state.lower_bound -= centroid_distance_to_previous_position[r_another];
         } else {
-            r_moved
-        };
+            state.lower_bound -= centroid_distance_to_previous_position[r];
+        }
     }
 }
 
@@ -199,7 +249,8 @@ struct InitializeResult {
     centroid_points_sum: Vec<f64>,      // c`(j) vector sum of all points in cluster j
     point_states: Vec<PointState>,
 }
-fn initialize(
+fn initialize<S: Simd>(
+    simd: S,
     centroids: &[f64],
     points: &[f64],
     dimensions: usize,
@@ -221,6 +272,7 @@ fn initialize(
     for (i, state) in point_states.iter_mut().enumerate() {
         let point_offset = i * dimensions;
         point_all_centers(
+            simd,
             &points[point_offset..],
             centroids,
             dimensions,
@@ -255,7 +307,8 @@ fn initialize(
 /// one of the centroids, instead of having it computed twice. The scan order is
 /// unchanged, so ties still resolve to the lowest index.
 #[inline]
-fn point_all_centers(
+fn point_all_centers<S: Simd>(
+    simd: S,
     point: &[f64],
     centroids: &[f64],
     dimensions: usize,
@@ -270,7 +323,7 @@ fn point_all_centers(
     for j in 0..k {
         let distance_squared = match known_centroid {
             Some((known, distance)) if known == j => distance,
-            _ => get_distance_squared(point, centroids, dimensions, j * dimensions),
+            _ => get_distance_squared(simd, point, centroids, dimensions, j * dimensions),
         };
 
         if distance_squared < min_distance_squared {
@@ -287,7 +340,8 @@ fn point_all_centers(
     state.lower_bound = second_distance_squared.sqrt();
 }
 
-fn get_min_centroid_skip_point_centroid(
+fn get_min_centroid_skip_point_centroid<S: Simd>(
+    simd: S,
     point: &[f64],
     centroids: &[f64],
     dimensions: usize,
@@ -301,7 +355,8 @@ fn get_min_centroid_skip_point_centroid(
             continue;
         }
 
-        let distance_squared = get_distance_squared(point, centroids, dimensions, j * dimensions);
+        let distance_squared =
+            get_distance_squared(simd, point, centroids, dimensions, j * dimensions);
         if distance_squared < min_distance_squared {
             min_distance_squared = distance_squared;
         }
@@ -310,23 +365,39 @@ fn get_min_centroid_skip_point_centroid(
     min_distance_squared.sqrt()
 }
 
-#[inline]
-fn get_distance_squared(
+#[inline(always)]
+fn get_distance_squared<S: Simd>(
+    simd: S,
     point: &[f64],
     centroids: &[f64],
     dimensions: usize,
     centroid_offset: usize,
 ) -> f64 {
-    // Indexed rather than iterator based: an interleaved benchmark of the
-    // alternatives (zip/map/sum, zip with an explicit loop, chunks_exact and
-    // plain indexing) put them within noise for 3 and 8 components, and plain
-    // indexing ahead by about 4% at 50 components. It is also the shortest form.
+    // This is the innermost loop of the whole crate, and it is not bound by
+    // floating-point throughput: the scalar form serialises every point through
+    // one accumulator, so the add latency chain, not the arithmetic, sets the
+    // pace. Two lanes halve that chain and halve the instruction count per
+    // point, which is what the four-dimensional and three-dimensional cases
+    // live on.
     let centroid = &centroids[centroid_offset..centroid_offset + dimensions];
-    let mut sum = 0.0;
-    for part in 0..dimensions {
+    let mut accumulator = f64x2::<S>::splat(simd, 0.0);
+    let mut part = 0;
+
+    while part + 2 <= dimensions {
+        let left = f64x2::<S>::from_slice(simd, &point[part..part + 2]);
+        let right = f64x2::<S>::from_slice(simd, &centroid[part..part + 2]);
+        let difference = left - right;
+        accumulator += difference * difference;
+        part += 2;
+    }
+
+    let mut sum = accumulator[0] + accumulator[1];
+    while part < dimensions {
         let difference = point[part] - centroid[part];
         sum += difference * difference;
+        part += 1;
     }
+
     sum
 }
 
@@ -396,7 +467,7 @@ fn get_centroids(points: &[f64], dimensions: usize, point_count: usize, k: usize
 
 #[cfg(test)]
 mod tests {
-    use super::hamerly_kmeans;
+    use super::hamerly_kmeans_dispatched;
 
     fn points(count: usize, dimensions: usize) -> Vec<f64> {
         let mut state = 0x12345678_u64;
@@ -414,7 +485,7 @@ mod tests {
     // FNV-1a over the exact bit patterns of the iteration count, the centroids
     // and every assignment, so any change in the clustering arithmetic shows up.
     fn fingerprint(count: usize, dimensions: usize, k: usize) -> String {
-        let result = hamerly_kmeans(k, 100, 0.1, &points(count, dimensions), dimensions);
+        let result = hamerly_kmeans_dispatched(k, 100, 0.1, &points(count, dimensions), dimensions);
         let mut hash = 0xcbf2_9ce4_8422_2325_u64;
 
         let mut eat = |value: u64| {
@@ -425,14 +496,14 @@ mod tests {
         };
 
         eat(result.iterations as u64);
-        eat(result.centroids.len() as u64);
-        for centroid in &result.centroids {
-            for value in centroid {
-                eat(value.to_bits());
-            }
+        // The cluster count, not the flat length, so this hash stays comparable
+        // with the values recorded when the result was one array per cluster.
+        eat((result.centroids.len() / result.dimensions) as u64);
+        for value in &result.centroids {
+            eat(value.to_bits());
         }
-        for index in &result.point_centroids {
-            eat(u64::from(*index));
+        for index in result.assignments() {
+            eat(u64::from(index));
         }
 
         format!("{hash:016x}")
@@ -463,20 +534,21 @@ mod tests {
 
     #[test]
     fn keeps_the_point_dimension_for_every_centroid() {
-        let result = hamerly_kmeans(6, 50, 0.1, &points(500, 7), 7);
+        let result = hamerly_kmeans_dispatched(6, 50, 0.1, &points(500, 7), 7);
 
-        assert_eq!(result.centroids.len(), 6);
-        for centroid in &result.centroids {
+        assert_eq!(result.centroids.len(), 6 * 7);
+        assert_eq!(result.dimensions, 7);
+        for centroid in result.centroid_rows() {
             assert_eq!(centroid.len(), 7);
         }
     }
 
     #[test]
     fn returns_nothing_for_empty_input() {
-        let result = hamerly_kmeans(3, 10, 0.1, &[], 3);
+        let result = hamerly_kmeans_dispatched(3, 10, 0.1, &[], 3);
 
         assert!(result.centroids.is_empty());
-        assert!(result.point_centroids.is_empty());
+        assert!(result.assignments().is_empty());
         assert_eq!(result.iterations, 0);
     }
 }

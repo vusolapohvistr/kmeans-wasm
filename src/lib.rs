@@ -34,7 +34,7 @@ fn validate_arguments(
         ));
     }
 
-    if slice_len % components != 0 {
+    if !slice_len.is_multiple_of(components) {
         return Err(JsValue::from_str(&format!(
             "Error: The length of {slice_name} must be a multiple of {components}."
         )));
@@ -58,13 +58,18 @@ fn quantize_packed_colors(
         points.push(*value as f64);
     }
 
-    let centroids =
-        kmeans_triangle::hamerly_kmeans(k, max_iter, convergence_threshold, &points, components);
+    let centroids = kmeans_triangle::hamerly_kmeans_dispatched(
+        k,
+        max_iter,
+        convergence_threshold,
+        &points,
+        components,
+    );
 
     centroids
         .centroids
         .iter()
-        .flat_map(|centroid| centroid.iter().map(|value| *value as u8))
+        .map(|value| *value as u8)
         .collect()
 }
 
@@ -239,22 +244,28 @@ pub fn kmeans(
         points.extend_from_slice(point);
     }
 
-    let result =
-        kmeans_triangle::hamerly_kmeans(k, max_iter, convergence_threshold, &points, dimension);
+    let result = kmeans_triangle::hamerly_kmeans_dispatched(
+        k,
+        max_iter,
+        convergence_threshold,
+        &points,
+        dimension,
+    );
 
     // `Array::new_with_length` would pre-fill the array with holes, so every
     // pushed centroid would land after `k` empty slots.
     let centroids_array = Array::new();
-    for centroid in result.centroids.iter() {
+    for centroid in result.centroid_rows() {
         let centroid_array = Array::new();
         for value in centroid {
-            centroid_array.push(&JsValue::from_f64(*value));
+            centroid_array.push(&JsValue::from_f64(value));
         }
         centroids_array.push(&centroid_array);
     }
 
-    let p_c = js_sys::Uint32Array::new_with_length(result.point_centroids.len() as u32);
-    for (i, point_index) in result.point_centroids.iter().enumerate() {
+    let assignments = result.assignments();
+    let p_c = js_sys::Uint32Array::new_with_length(assignments.len() as u32);
+    for (i, point_index) in assignments.iter().enumerate() {
         p_c.set_index(i as u32, *point_index);
     }
 
