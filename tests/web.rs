@@ -56,15 +56,13 @@ fn assigns_new_points_to_the_nearest_centroid() {
     let result = kmeans(data, 2, 100, Some(0.001)).unwrap();
     let test: Function = property(&result, "test").into();
 
-    let near_first = test
-        .call1(&JsValue::NULL, &to_js_array(&[1.0, 1.0]))
-        .unwrap();
-    let near_second = test
-        .call1(&JsValue::NULL, &to_js_array(&[9.0, 9.0]))
-        .unwrap();
+    // The helper reads `this.centroids`, so it has to be called with the result
+    // bound as the receiver, exactly like `result.test(point)` in JavaScript.
+    let near_first = test.call1(&result, &to_js_array(&[1.0, 1.0])).unwrap();
+    let near_second = test.call1(&result, &to_js_array(&[9.0, 9.0])).unwrap();
 
     assert_ne!(near_first.as_f64().unwrap(), near_second.as_f64().unwrap());
-    assert!(test.call1(&JsValue::NULL, &to_js_array(&[1.0])).is_err());
+    assert!(test.call1(&result, &to_js_array(&[1.0])).is_err());
 }
 
 #[wasm_bindgen_test]
