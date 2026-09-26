@@ -221,10 +221,6 @@ a fixed cost per point. It dominates the small rows and shrinks as the cluster
 count grows, which is why `kmeans_rgb` and `kmeans_rgba` are worth reaching for
 whenever the data is three or four values wide.
 
-## Comparison with skmeans
-
-You can compare both libraries at <https://ycatbink0t.github.io/kmeans-web-comparison/>.
-
 ## Contributing
 
 Pull requests and issues are welcome. Add tests for new features and bug fixes.

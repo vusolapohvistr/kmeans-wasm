@@ -216,6 +216,21 @@ fn move_centers(
     for j in 0..k {
         let centroid_offset = j * dimensions;
         let points_count = centroid_points_counts[j] as f64;
+
+        // An empty cluster has no mean to move to, so dividing by its zero count
+        // produced a NaN centroid. NaN saturates to 0 in the packed output, so
+        // the caller received a spurious black palette entry, and the NaN then
+        // spread into the bound update. Empty clusters are unavoidable when the
+        // input holds fewer distinct values than k, and for packed colour input
+        // they are ordinary, because two seeds can land on exactly equal pixels
+        // and, ties resolving to the lowest index, one centre then takes every
+        // point. Leave the centroid where it is: that is a real colour, and a
+        // zero movement keeps the bounds finite.
+        if points_count == 0.0 {
+            centroid_distance_to_previous_position[j] = 0.0;
+            continue;
+        }
+
         let mut squared_distance_moved = 0.0;
         for part in 0..dimensions {
             let index = centroid_offset + part;
