@@ -1,5 +1,8 @@
 [target.wasm32-unknown-unknown]
+# `simd128` is the only feature that has to be requested: rustc already enables
+# bulk-memory, multivalue, mutable-globals, nontrapping-fptoint, reference-types
+# and sign-ext by default on this target, so listing them here is a no-op.
 rustflags = [
     "-C",
-    "target-feature=+simd128,+bulk-memory,+reference-types,+sign-ext",
+    "target-feature=+simd128",
 ]

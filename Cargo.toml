@@ -3,7 +3,7 @@ name = "kmeans-wasm"
 version = "3.4.0"
 authors = ["Serhii Pylypchuk <sergiydjan@gmail.com>"]
 edition = "2024"
-rust-version = "1.86"
+rust-version = "1.98"
 description = "A fast k-means clustering implementation using WebAssembly for color quantization and general vector-space clustering."
 keywords = ["webassembly", "wasm", "k-means", "clustering", "color-quantization"]
 repository = "https://github.com/vusolapohvistr/kmeans-wasm"
@@ -14,15 +14,16 @@ license = "MIT"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-wasm-bindgen = "0.2.128"
-js-sys = "0.3.105"
+wasm-bindgen = "0.2.129"
+js-sys = "0.3.106"
 rand = "0.10.3"
+fearless_simd = { version = "1.0.0", default-features = false, features = ["libm"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-getrandom = { version = "0.4", features = ["wasm_js"] }
+getrandom = { version = "0.4.3", features = ["wasm_js"] }
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
-wasm-bindgen-test = "0.3.78"
+wasm-bindgen-test = "0.3.79"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 criterion = "0.8.2"
@@ -43,10 +44,10 @@ name = "kmeans_rgba"
 harness = false
 
 [package.metadata.wasm-pack.profile.dev]
-wasm-opt = ["--enable-simd", "--enable-bulk-memory", "--enable-reference-types", "--enable-sign-ext", "--enable-nontrapping-float-to-int"]
+wasm-opt = ["--enable-simd", "--enable-bulk-memory", "--enable-nontrapping-float-to-int"]
 
 [package.metadata.wasm-pack.profile.profiling]
-wasm-opt = ["--enable-simd", "--enable-bulk-memory", "--enable-reference-types", "--enable-sign-ext", "--enable-nontrapping-float-to-int"]
+wasm-opt = ["--enable-simd", "--enable-bulk-memory", "--enable-nontrapping-float-to-int"]
 
 [package.metadata.wasm-pack.profile.release]
-wasm-opt = ["-O4", "--enable-simd", "--enable-bulk-memory", "--enable-reference-types", "--enable-sign-ext", "--enable-nontrapping-float-to-int"]
+wasm-opt = ["-O4", "--enable-simd", "--enable-bulk-memory", "--enable-nontrapping-float-to-int"]

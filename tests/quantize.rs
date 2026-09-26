@@ -33,7 +33,9 @@ fn clusters_the_alpha_channel() {
     let centroids = kmeans_rgba(rgba, 2, 100, Some(0.001)).unwrap();
 
     let alphas = centroids
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .map(|centroid| centroid[3])
         .collect::<Vec<_>>();
     assert!(
