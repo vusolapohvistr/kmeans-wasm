@@ -97,9 +97,11 @@ function prepareImage(image) {
 
   sourceContext.drawImage(image, 0, 0, width, height);
   const imageData = sourceContext.getImageData(0, 0, width, height);
-  // Zero-copy view over the RGBA buffer `ImageData` already provides, so
-  // kmeans_rgba clusters exactly what the canvas holds.
-  const rgba = new Uint8Array(imageData.buffer, imageData.byteOffset, imageData.length);
+  // Zero-copy view over the RGBA buffer. `buffer`, `byteOffset` and `length`
+  // belong to the Uint8ClampedArray at `imageData.data`, not to the ImageData
+  // itself, which only has `data`, `width`, `height` and `colorSpace`.
+  const pixels = imageData.data;
+  const rgba = new Uint8Array(pixels.buffer, pixels.byteOffset, pixels.length);
   const pixelCount = width * height;
   const rgb = new Uint8Array(pixelCount * RGB_STRIDE);
   const points = new Array(pixelCount);
