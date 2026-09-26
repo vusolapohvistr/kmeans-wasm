@@ -4,11 +4,14 @@ A fast k-means clustering implementation written in Rust and compiled to WebAsse
 
 Version 3 uses WebAssembly SIMD (`simd128`) for performance. Use a runtime with SIMD support, such as Chrome 91+, Firefox 89+, or Safari 16.4+.
 
+Everything else the module relies on, including bulk memory, reference types, sign extension, non-trapping float-to-int conversion and multi-value, has been on by default in every major browser for several years and is assumed rather than negotiated.
+
 ## Features
 
 - Hamerly k-means algorithm
 - RGB and RGBA color quantization
 - Arbitrary numeric vector spaces
+- SIMD accelerated inner loop, with no `unsafe` and no runtime feature detection
 - JavaScript and TypeScript bindings
 - ES module package with a documented `exports` entry point
 
@@ -21,6 +24,20 @@ npm install kmeans-wasm
 The published package targets JavaScript bundlers and exposes an ES module.
 
 ## Usage
+
+Three entry points, all sharing the same clustering core. Pick the one that matches
+your data layout:
+
+| Export | Input | Use it for |
+| --- | --- | --- |
+| `kmeans_rgb` | `Uint8Array`, 3 values per point | image and palette work |
+| `kmeans_rgba` | `Uint8Array`, 4 values per point | the same, when alpha matters |
+| `kmeans` | `Array<Array<number>>` | any other number of dimensions |
+
+The packed entry points take a flat typed array and are several times faster than
+the general one, because nothing has to be copied across the JavaScript boundary
+per point. The general entry point is the only option once you have more or fewer
+than three or four values per point.
 
 ### General vector spaces
 
@@ -44,9 +61,25 @@ console.log(result.idxs);
 
 - `k`: the requested cluster count
 - `it`: the number of completed iterations
-- `centroids`: the calculated centroids
+- `centroids`: the calculated centroids, an array of `k` arrays of `dimensions` numbers
 - `idxs`: a `Uint32Array` mapping each input point to a centroid
 - `test`: a helper that assigns a new point to the nearest centroid
+
+All points must have the same number of values, otherwise the call throws.
+
+`test` is a method on the result, so call it as `result.test(point)`:
+
+```js
+const result = kmeans(data, 3, 1_000, 0.001);
+
+// Which cluster does a new 2D point belong to?
+const cluster = result.test([2.5, 3.5]);
+
+// Bring your own distance function if you are not working in plain Euclidean space.
+const byManhattan = result.test([2.5, 3.5], (a, b) =>
+  a.reduce((sum, value, i) => sum + Math.abs(value - b[i]), 0),
+);
+```
 
 ### RGB color quantization
 
@@ -62,7 +95,8 @@ const rgb = new Uint8Array([
 const quantizedColors = kmeans_rgb(rgb, 3, 1_000, 0.001);
 ```
 
-`kmeans_rgb` returns a `Uint8Array` containing the RGB centroids.
+`kmeans_rgb` returns a `Uint8Array` containing the RGB centroids. The input length
+must be a multiple of three, one value per channel per pixel.
 
 ### RGBA color quantization
 
@@ -78,78 +112,82 @@ const rgba = new Uint8Array([
 const quantizedColors = kmeans_rgba(rgba, 3, 1_000, 0.001);
 ```
 
-`kmeans_rgba` mirrors `kmeans_rgb` for four-component vectors and returns a `Uint8Array` containing
-the RGBA centroids. It is the drop-in choice for `ImageData.data` and other buffers that interleave
-red, green, blue, and alpha, because no repacking is needed before clustering. The alpha channel is
-clustered like any other component, so the function also works for data that mixes transparent and
-opaque pixels.
+`kmeans_rgba` mirrors `kmeans_rgb` for four-component vectors and returns a `Uint8Array` containing the RGBA centroids. It is the drop-in choice for `ImageData.data` and other buffers that interleave red, green, blue, and alpha, because no repacking is needed before clustering. The alpha channel is clustered like any other component, so the function also works for data that mixes transparent and opaque pixels. The input length must be a multiple of four.
 
-## Development
+### Quantizing an image in the browser
 
-Prerequisites:
+Because `ImageData.data` is already a packed RGBA buffer, the canvas is both the
+input and the output, with no intermediate conversion:
 
-- Rust 1.86 or newer
-- Node.js 22.22.2+, 24.15.0+, or 26.0.0+
-- npm 12.1.0
-- Chrome or Chromium for browser tests
+```js
+import { kmeans_rgba } from "kmeans-wasm";
 
-Install the toolchain and dependencies:
+const context = canvas.getContext("2d", { willReadFrequently: true });
+const image = context.getImageData(0, 0, canvas.width, canvas.height);
 
-```sh
-rustup target add wasm32-unknown-unknown
-cargo install wasm-pack --version 0.15.0 --locked
-npm ci
+const palette = kmeans_rgba(image.data, 16, 30, 0.1);
+
+// paint: replace every pixel with its nearest palette entry
+const output = context.createImageData(canvas.width, canvas.height);
+for (let pixel = 0; pixel < canvas.width * canvas.height; pixel += 1) {
+  const source = pixel * 4;
+  const nearest = nearestPaletteEntry(palette, image.data, source);
+  output.data[source] = palette[nearest];
+  output.data[source + 1] = palette[nearest + 1];
+  output.data[source + 2] = palette[nearest + 2];
+  output.data[source + 3] = palette[nearest + 3];
+}
+context.putImageData(output, 0, 0);
+
+function nearestPaletteEntry(palette, pixels, offset) {
+  let best = 0;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  for (let entry = 0; entry < palette.length; entry += 4) {
+    let distance = 0;
+    for (let channel = 0; channel < 4; channel += 1) {
+      const delta = pixels[offset + channel] - palette[entry + channel];
+      distance += delta * delta;
+    }
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best = entry;
+    }
+  }
+  return best;
+}
 ```
 
-Run the native, package, and TypeScript compatibility checks:
+Run a full working version, including a three-way speed comparison against
+`kmeans_rgb` and `skmeans`, at
+[vusolapohvistr.github.io/kmeans-wasm](https://vusolapohvistr.github.io/kmeans-wasm/).
 
-```sh
-npm run check
-```
+### Arguments and errors
 
-Run the browser test suite separately:
+All three entry points throw a `string` on invalid input, so `try`/`catch` and
+`String(error)` are enough to report a problem:
 
-```sh
-npm run test:web
-```
+- `k` must be at least 2
+- `maxIter` must be at least 1
+- `convergenceThreshold` must not be negative
+- `kmeans_rgb` and `kmeans_rgba` need a length that is a multiple of 3 or 4
+- `kmeans` needs every point to have the same dimension
 
-The release build is written to `pkg/`. Run `npm run package:check` to rebuild it and validate it with `publint` and `attw`.
-
-## Browser playground
-
-The [GitHub Pages comparison](https://vusolapohvistr.github.io/kmeans-wasm/) shows one public-domain Blue Marble image clustered with `kmeans_rgb`, with `kmeans_rgba`, and with `skmeans`, and reports the measured time of each implementation. It builds the browser WebAssembly package into the ignored `docs/wasm/` directory:
-
-```sh
-npm ci
-npm run pages:build
-npx serve docs
-```
-
-The page is intentionally a single-image comparison rather than a full application. See the [comparison source and deployment notes](https://github.com/vusolapohvistr/kmeans-wasm/tree/main/docs) for details.
+A `convergenceThreshold` of `0` runs until `maxIter`. Passing a small positive
+value such as `0.1` stops earlier once the centroids stop moving, which is what
+you normally want for interactive work.
 
 ## Benchmarks
 
-Run the RGB comparison locally with the same release WebAssembly build used by the demo:
-
-```sh
-npm ci
-npm run bench:rgb
-```
-
-Run the general vector-space comparison the same way:
-
-```sh
-npm ci
-npm run bench:kmeans
-```
-
-Both benchmarks use deterministic point sets, report median wall time, and print a table suitable for updating this README. The Rust Criterion benchmarks are also available with `cargo bench --bench kmeans_rgb` and `cargo bench --bench kmeans_rgba`.
-
-The earlier 1,000-pixel example was too small to be representative: startup, input conversion, and measurement noise dominated the result. The native benchmark now pre-generates its input and tests 10k, 100k, and 409,600 pixels; the JavaScript benchmark rebuilds the WASM artifact before every benchmark run. The single-image comparison page reports the browser clustering time for all three implementations and shows what the extra alpha component of `kmeans_rgba` costs next to `kmeans_rgb`.
+Both reference tables below come from the release WebAssembly build, measured
+locally on Node.js 26.10.0 over an AMD Ryzen 5 9600X, as the median of five runs
+of the harness. Results vary by CPU, runtime, initialization, and convergence
+behavior, and the smallest rows are the noisiest because fixed overhead is a
+large share of them.
 
 ### Reference RGB results
 
-These are median wall times from a local Node.js 26.10.0 run on an AMD Ryzen 5 9600X, using the release WebAssembly build, npm 12.1.0, two warm-ups, and eight measured runs. Each cell is the median of five harness runs, because a single run on a shared machine is not reproducible to better than roughly 30%. The browser playground is available at [vusolapohvistr.github.io/kmeans-wasm](https://vusolapohvistr.github.io/kmeans-wasm/).
+Median wall times, two warm-ups and eight measured runs per harness run, 100
+maximum iterations.
 
 | Test | Pixels | Colors | `kmeans_rgb` | `skmeans` | Speed-up |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -160,11 +198,9 @@ These are median wall times from a local Node.js 26.10.0 run on an AMD Ryzen 5 9
 | RGB random pixels | 100,000 | 8 | 14.29 ms | 57.24 ms | 3.6× |
 | RGB random pixels | 100,000 | 32 | 56.46 ms | 126.95 ms | 2.3× |
 
-`kmeans_rgb` is measured directly; `skmeans` receives the equivalent three-dimensional points. Results vary by CPU, browser, initialization, and convergence behavior. See the [reproducible benchmark harness](https://github.com/vusolapohvistr/kmeans-wasm/blob/main/js_bench/src/rgb.ts) for details. The package finalizer copies this README into `pkg/`, so the table is also visible on the npm package page.
-
 ### Reference general vector-space results
 
-These are median wall times from a local Node.js 26.10.0 run on an AMD Ryzen 5 9600X, using the release WebAssembly build and npm 12.1.0. Each cell is the median of five harness runs, and every harness run is itself a median of eight measured runs after two warm-ups, with 100 maximum iterations and a 0.1 convergence threshold. Every point is a deterministic pseudo-random vector of `u8`-range values.
+Same measurement setup, over points of varying dimension and cluster count.
 
 | Points | Dimensions | Clusters | `kmeans` | `kmeans_rgb` | `skmeans` | Speed-up | Packed speed-up |
 | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -177,54 +213,12 @@ These are median wall times from a local Node.js 26.10.0 run on an AMD Ryzen 5 9
 | 10,000 | 50 | 10 | 21.41 ms | — | 60.57 ms | 2.9× | — |
 | 10,000 | 50 | 50 | 36.68 ms | — | 114.21 ms | 3.2× | — |
 
-`Speed-up` is `skmeans` divided by `kmeans`. `Packed speed-up` is `kmeans` divided by `kmeans_rgb` on the same three-dimensional points, and is shown only where the packed three-component API applies. All three columns measure the same clustering problem; the general `kmeans` call has to copy each point across the JavaScript boundary, while `kmeans_rgb` receives one packed `Uint8Array`.
+`Speed-up` is `skmeans` divided by `kmeans`. `Packed speed-up` is `kmeans` divided by `kmeans_rgb` on the same three-dimensional points, and is shown only where the packed three-component API applies.
 
-That interop cost is fixed per point, so it dominates the small cases and shrinks as the cluster count grows. It is also why the playground page only benchmarks the packed color paths: converting a 480px preview into one array of point arrays costs more than the clustering itself. Prefer `kmeans_rgb` or `kmeans_rgba` for three- and four-component data, and reserve `kmeans` for genuinely arbitrary dimensions. Results vary by CPU, runtime, initialization, and convergence behavior; the smallest rows are the noisiest because fixed overhead is a large share of them. See the [reproducible benchmark harness](https://github.com/vusolapohvistr/kmeans-wasm/blob/main/js_bench/src/vector.ts) for details.
-
-## Releases
-
-Releases use [`release-it`](https://github.com/release-it/release-it) locally. It reads and writes the version in `Cargo.toml`, refreshes `Cargo.lock`, runs the checks, commits the release, creates a `vX.Y.Z` tag, pushes it, and creates the GitHub Release.
-
-After the GitHub Release is created, the `release:stage` hook runs `npm stage publish` against the generated `pkg/` directory. npm staging does not require a 2FA prompt; a maintainer must inspect the tarball and approve it with 2FA. This is compatible with npm's planned January 2027 removal of direct publishing through bypass-2FA GATs. There is no GitHub Actions npm publisher and no npm token in the repository.
-
-Before releasing, authenticate locally with npm's web login:
-
-```sh
-npm login --auth-type=web --registry=https://registry.npmjs.org
-npm whoami
-```
-
-Do not commit `.npmrc` or tokens. If a token is required, use an npm granular access token with **Read and write (stage only)** permissions for `kmeans-wasm`; never use a bypass-2FA token for direct publishing.
-
-To release:
-
-1. Merge the release changes to `main` and make sure CI is green.
-2. Pull `main`, install dependencies, and preview the release:
-
-   ```sh
-   git switch main
-   git pull --ff-only
-   npm ci
-   npm run release:dry
-   ```
-
-3. Start the release and choose the semantic version:
-
-   ```sh
-   npm run release
-   ```
-
-   Without `GITHUB_TOKEN`, `release-it` opens a prefilled GitHub Release page for manual confirmation; set a repository-scoped `GITHUB_TOKEN` when automated GitHub Release creation is preferred. After the release is created, the local hook stages the npm tarball.
-
-4. Inspect and approve the staged npm package with 2FA:
-
-   ```sh
-   npm stage list kmeans-wasm
-   npm stage download <stage-id>
-   npm stage approve <stage-id>
-   ```
-
-Stable versions use the `latest` npm tag and prereleases use `next`. Reject a staged release with `npm stage reject <stage-id>` if manual inspection finds a problem.
+The general call has to copy every point across the JavaScript boundary, which is
+a fixed cost per point. It dominates the small rows and shrinks as the cluster
+count grows, which is why `kmeans_rgb` and `kmeans_rgba` are worth reaching for
+whenever the data is three or four values wide.
 
 ## Comparison with skmeans
 
