@@ -1,3 +1,8 @@
+[features]
+# Counters for the work-split probe. They sit in the innermost loop, so the
+# shipped build compiles them out.
+counters = []
+
 [package]
 name = "kmeans-wasm"
 version = "3.6.0"
@@ -59,3 +64,10 @@ harness = false
 [[bench]]
 name = "mapping_probe"
 harness = false
+
+[[bench]]
+name = "work_split"
+harness = false
+# The counters are compiled out of the shipped build, so this bench only means
+# anything with the feature on: cargo bench --bench work_split --features counters
+required-features = ["counters"]

@@ -178,6 +178,8 @@ pub fn hamerly_kmeans_weighted<S: Simd>(
         }
 
         for (i, state) in point_states.iter_mut().enumerate() {
+            #[cfg(feature = "counters")]
+            crate::work::count_one(&crate::work::BOUND_CHECKS);
             let point_offset = i * dimensions;
 
             let m = f64::max(
@@ -195,6 +197,8 @@ pub fn hamerly_kmeans_weighted<S: Simd>(
                 );
                 state.upper_bound = current_distance_squared.sqrt();
                 if state.upper_bound > m {
+                    #[cfg(feature = "counters")]
+                    crate::work::count_one(&crate::work::FULL_SCANS);
                     let previous_point_centroid = state.centroid;
                     point_all_centers(
                         simd,
@@ -209,6 +213,8 @@ pub fn hamerly_kmeans_weighted<S: Simd>(
                         let previous = previous_point_centroid as usize * dimensions;
                         let current = state.centroid as usize * dimensions;
                         let weight = weights.map_or(1.0, |all| all[i]);
+                        #[cfg(feature = "counters")]
+                        crate::work::count(&crate::work::SUM_UPDATES, 2 * dimensions as u64 + 2);
                         centroid_points_counts[previous_point_centroid as usize] -= weight;
                         for part in 0..dimensions {
                             let value = weight * points[point_offset + part];
@@ -263,6 +269,9 @@ fn update_bounds(
         .max_by(|a, b| a.1.total_cmp(b.1))
         .unwrap()
         .0;
+
+    #[cfg(feature = "counters")]
+    crate::work::count(&crate::work::BOUND_UPDATES, point_states.len() as u64);
 
     for state in point_states.iter_mut() {
         state.upper_bound += centroid_distance_to_previous_position[state.centroid as usize];
@@ -467,6 +476,9 @@ fn get_distance_squared<S: Simd>(
     // pace. Two lanes halve that chain and halve the instruction count per
     // point, which is what the four-dimensional and three-dimensional cases
     // live on.
+    #[cfg(feature = "counters")]
+    crate::work::count_one(&crate::work::DISTANCE_EVALUATIONS);
+
     let centroid = &centroids[centroid_offset..centroid_offset + dimensions];
     let mut accumulator = f64x2::<S>::splat(simd, 0.0);
     let mut part = 0;

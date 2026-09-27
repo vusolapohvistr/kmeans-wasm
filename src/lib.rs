@@ -1,5 +1,7 @@
 pub mod kmeans_triangle;
 pub mod packed_histogram;
+#[cfg(feature = "counters")]
+pub mod work;
 
 use js_sys::{Array, Function, Object, Reflect};
 use wasm_bindgen::{JsCast, prelude::*};
