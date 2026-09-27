@@ -13,6 +13,7 @@ npm as `kmeans-wasm`. Three public entry points:
 | `kmeans_rgb` | `Uint8Array`, 3 components per point | `Uint8Array` of centroids | packed color path |
 | `kmeans_rgba` | `Uint8Array`, 4 components per point | `Uint8Array` of centroids | clusters alpha too |
 | `kmeans` | `Array<Array<number>>` | object with `k`, `it`, `centroids`, `idxs`, `test` | arbitrary dimensions |
+| `apply_palette` | `Uint8Array`, a palette | `Uint8Array` of RGBA pixels | maps a palette onto an image |
 
 `kmeans` returns a JS object, so it is only usable from JavaScript. The `js_sys`
 calls abort the process on native targets, which is why the general API has no
@@ -23,14 +24,21 @@ native test coverage and its benchmark harness is a Node script.
 ```
 src/lib.rs                 public API, argument validation, input conversion
 src/kmeans_triangle.rs     the clustering core: hamerly_kmeans and helpers
+src/packed_histogram.rs    collapse to distinct colours, and the palette map
 benches/kmeans_rgb.rs      native Criterion bench, packed 3-component
 benches/kmeans_rgba.rs     native Criterion bench, packed 4-component
+benches/dedup_probe.rs     where the reduction to distinct colours starts paying
+benches/mapping_probe.rs   where the palette map beats a per-pixel search
 js_bench/src/rgb.ts        Node harness: kmeans_rgb vs skmeans
 js_bench/src/vector.ts     Node harness: kmeans vs skmeans vs kmeans_rgb
+js_bench/src/images.ts     Node harness: the four test photographs
 docs/                      GitHub Pages playground (index.html, app.js, styles.css)
 scripts/                   npm package finalizer, npm staging helper
+scripts/check-page.mjs     runs docs/app.js headless and checks what it painted
 tests/web.rs               wasm-only tests (browser)
 tests/quantize.rs          native tests for the packed paths
+tests/histogram.rs         native tests for the reduction
+tests/palette.rs           native tests for the mapping
 ```
 
 `docs/wasm/`, `pkg/`, `kmeans-wasm-node/`, `target/` and `node_modules/` are
@@ -43,7 +51,7 @@ npm ci
 npm run check          # lint + native tests + package validation
 npm run lint           # cargo fmt --check + clippy -D warnings (all targets, host)
 npm test               # cargo test --locked
-npm run test:web       # wasm-pack test --chrome --headless  (needs Chrome)
+npm run test:web       # the wasm suite, in a real browser
 npm run build          # wasm-pack -> pkg/ + finalize-npm-package.mjs
 npm run pages:build    # wasm-pack --target web -> docs/wasm/
 npm run bench:rgb      # rebuilds the node target, then runs js_bench/src/rgb.ts
@@ -60,7 +68,9 @@ results` headings.
 ## Setting up a checkout
 
 Prerequisites: Rust 1.98 or newer, Node `^22.22.2 || ^24.15.0 || >=26`, npm
-12.1.0 exactly, wasm-pack 0.15.0, and Chrome or Chromium for the browser tests.
+12.1.0 exactly, and wasm-pack 0.15.0. A browser is needed only for
+`npm run test:web`; `npx playwright install chromium` provides one, and
+`scripts/run-web-tests.mjs` fetches the chromedriver to match it.
 
 ```sh
 rustup target add wasm32-unknown-unknown
@@ -74,6 +84,10 @@ To preview the playground page locally:
 npm run pages:build
 npx serve docs
 ```
+
+`npm run test:web` needs a browser and a chromedriver of the same version; the
+script finds or fetches both. On a machine without Chromium's system libraries,
+point `BROWSER_LIBS` at a directory holding them.
 
 The benchmark harnesses rebuild the Node target of the WebAssembly package before
 they run, so `npm run bench:rgb` and `npm run bench:kmeans` always measure the
@@ -107,7 +121,12 @@ There are two places, and they are not the same thing:
   Only `--enable-simd`, `--enable-bulk-memory` and `--enable-nontrapping-float-to-int`
   are needed. Binaryen 117 has sign-extension and reference types on by default,
   so those two flags were removed; the build still produces a byte-identical
-  artifact (md5 `28866c3322ee41328ab582ed7d41e011`, 34,016 bytes) without them.
+  artifact (md5 `28866c3322ee41328ab582ed7d41e011`, 34,016 bytes at the time)
+  without them. The current artifact is larger and is expected to be: adding
+  `apply_palette` in 3.6.0 took it to 41,270 bytes, md5
+  `5d1628a94991c3910a36fe4489629f8c`, for 7,254 bytes of added entry point. The
+  hash is only comparable against another build of the same commit, so treat it
+  as a fingerprint rather than a target.
 
 When changing either list, rebuild and compare the artifact hash. A flag that is
 redundant must not change the output; if it does, it was doing something.
@@ -319,6 +338,67 @@ periodic input, so the decision is made from the distinct count alone, with a ta
 that never grows. The table size is set by the real photographs, not by taste: at
 2^17 the reduction declined two of the four test images that clearly benefited.
 
+## Mapping a palette back onto an image, and the predictor that does not work
+
+`apply_palette` is the other half of quantization: clustering gives the palette,
+this replaces each pixel with its nearest entry. Callers were writing that loop
+themselves, and a per-pixel search is `n * k`, so 29 million distance
+evaluations for a megapixel at 32 colours. `src/packed_histogram.rs` resolves
+each distinct colour once and then maps every pixel with one table probe, sharing
+the open-addressing table that `collapse` already builds.
+
+**The result is bit-identical to a per-pixel search, and that is a property
+rather than a hope.** The comparison is strict `<`, so a tie keeps the lower
+index, which is what the clustering core does and what a caller's `<` in
+JavaScript does. The distance is integer, which is not a shortcut: a channel
+difference is at most 255, its square at most 65025, four of those sum to 260100,
+so `u32` reproduces the `f64` a JavaScript caller computes exactly. Verified from
+20 random starting points and across 80 shape combinations, plus byte-identical
+against a transcribed JavaScript loop on all four real images.
+
+**The table wins below about half distinct and loses above it, and the losing
+side is bounded rather than open-ended.** `benches/mapping_probe.rs` measures
+5.9x at 0.02% distinct, 2.5x at 11%, 1.5x at 32%, level at 46%, 0.8x at 64%.
+Above the table's capacity `Table::build` gives up and the call becomes a plain
+search, which costs 0.83x: the wasted build plus the search. Every real image is
+under the crossover, and through wasm against the JavaScript loop this replaces
+it is 1.24x to 2.00x faster with identical bytes.
+
+**A rule that gave up on the *running* distinct share was written, measured, and
+removed. Do not write it again.** The share of distinct values seen so far is
+tempting: it is free, it is already computed, and it looks like it predicts the
+final share. It does not, and the reason is that it is not even monotone. It
+*rises* while new colours are still arriving faster than the running average and
+only falls afterwards, so it is a hump, not a bound. Measured on the four real
+images, the share at the first eighth of the buffer against the final share:
+
+| image | at 1/8 | at 1/4 | at 1/2 | final |
+| --- | --- | --- | --- | --- |
+| blue-marble | 12.6% | 13.8% | 10.8% | 6.2% |
+| city | 34.4% | 46.6% | 48.2% | 45.8% |
+| coast | 30.4% | 41.3% | 46.3% | 30.5% |
+| harbour | 14.1% | 17.0% | 35.9% | 36.6% |
+
+It over-estimates blue-marble by 2x, under-estimates harbour by 2.5x, and is
+level on coast. Any threshold misfires on real photographs. Worse, on a
+round-robin generator it misfires catastrophically: `index % distinct` reaches
+every colour within the first `distinct` pixels, so the share is at its final
+value immediately and a third-share rule abandoned input that was 10.7% distinct
+and should have run 2.5x. That is the same class of bug as the sampling pre-check
+recorded above, and the same lesson: **a decision needs a signal that is valid
+for the input it will actually see, and round-robin is not an image.**
+
+**The probe's generator needed three separate fixes, each of which silently
+measured the wrong thing.** It now asserts the distinct count it produced, which
+is the only reason the last two were caught. Worth keeping in mind when a
+benchmark reports a suspiciously uniform result: at one point the table measured
+6.3x at *every* distinct count including 100%, which is impossible, and the
+cause was a block size that capped the real distinct count at 300. A second
+version fixed the block at 32 by 32 without deriving the height from the requested
+count, and capped it again. Random `u8` triples collide by birthday, so a
+4096-colour palette was really 4094. All three were invisible in the output and
+obvious in hindsight.
+
 ## Convergence is data-scale dependent, and the packed default now accounts for it
 
 `total_squared_distance_moved` is compared against an absolute threshold, so whether
@@ -416,18 +496,53 @@ created automatically. Do not commit `.npmrc` or tokens. If a token is needed, u
 an npm granular access token with **Read and write (stage only)** permissions for
 `kmeans-wasm`, and never a bypass-2FA token for direct publishing.
 
+## The wasm suite runs locally now
+
+`npm run test:web` used to be CI-only, because no browser was available here. It
+works now, via `scripts/run-web-tests.mjs`, which needed three things that
+`wasm-pack` does not provide:
+
+- **A browser.** `npx playwright install chromium` is the source. It is worth
+  knowing that Playwright's Chromium will not start on a bare machine: it needs
+  `libnspr4`, `libnss3` and `libasound2`, and `npx playwright install
+  --with-deps` cannot fix that without root. The workaround is to fetch the
+  Ubuntu packages with `apt-get download`, unpack them with `dpkg-deb -x` into a
+  prefix, and point `BROWSER_LIBS` at it. The script puts that prefix on
+  `LD_LIBRARY_PATH` for itself as well as its children, because the version
+  probes launch the browser directly.
+- **A chromedriver of the exact same version.** `wasm-pack` downloads one, but it
+  tracks Chrome stable rather than the installed browser, so a Playwright
+  Chromium 153 against its cached driver 154 fails with *cannot find Chrome
+  binary*, which is a misleading way of saying the versions disagree. Chrome for
+  Testing publishes an exact-version build for every Playwright release, so the
+  script fetches
+  `storage.googleapis.com/chrome-for-testing-public/<version>/linux64/chromedriver-linux64.zip`
+  and caches it in `.browsers/`.
+- **Capabilities.** chromedriver does not read the `CHROME` environment variable
+  and only looks for Chrome in its own well-known locations. The test runner does
+  read a `webdriver.json` from the working directory, so the script writes one
+  with the binary path and the headless flags, and removes it afterwards.
+
+**WebGPU needs a secure context, and that is the whole reason it looked
+unavailable.** `navigator.gpu` is undefined on `about:blank`, which is an opaque
+origin, and also on any `file:` page. Served from `http://localhost` with
+`--enable-unsafe-webgpu`, `requestAdapter` and `requestDevice` both succeed in
+Playwright's headless Chromium, on a software adapter. Any WebGPU work here has to
+be driven through a local HTTP server; a probe that opens `about:blank` and
+concludes WebGPU is unsupported is wrong.
+
 ## Testing gaps
 
-- The wasm suite only runs in CI. No Chrome or Chromium binary is available in
-  the agent environment, so `npm run test:web` cannot be run locally. Every
-  assertion destined for `tests/web.rs` should first be checked against the Node
-  build to avoid pushing a red CI.
 - Native and wasm have separate `get_centroids` entropy paths, so a native test
   cannot cover the wasm one. A bug in the wasm row-slicing was introduced during
   the flat-buffer rewrite and was invisible to every native test; it was caught
   by running `docs/app.js` under a headless DOM harness. Keep that harness idea
   in mind: shim `document`, `Image` and `getContext`, stub `fetch` for `file:`
   URLs so the wasm-pack web glue can load, then import `docs/app.js` directly.
+- `cargo build --target wasm32-unknown-unknown --tests` is still the only check
+  that covers `tests/web.rs` at compile time, since neither `npm run check` nor
+  `clippy --all-targets` builds the wasm test target. Two of its assertions were
+  red in CI for exactly that reason before this was noticed.
 
 ## The playground page has a test now
 

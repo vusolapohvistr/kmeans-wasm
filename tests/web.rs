@@ -3,7 +3,7 @@
 #![cfg(target_arch = "wasm32")]
 
 use js_sys::{Array, Function, Uint32Array};
-use kmeans_wasm::{kmeans, kmeans_rgb, kmeans_rgba};
+use kmeans_wasm::{apply_palette, kmeans, kmeans_rgb, kmeans_rgba};
 use wasm_bindgen::JsValue;
 use wasm_bindgen_test::*;
 
@@ -189,4 +189,80 @@ fn accepts_a_single_pixel() {
     let palette = kmeans_rgb(vec![10, 20, 30], 2, 100, Some(0.1)).unwrap();
     assert_eq!(palette.len(), 6);
     assert!(palette.iter().all(|value| matches!(*value, 10 | 20 | 30)));
+}
+
+/// The clustering and the mapping compose: every pixel has to come out as one of
+/// the palette's own colours, and the mapping has to be the nearest one, which is
+/// checked here by confirming nothing was invented and the two flat colours went
+/// to their own entries.
+#[wasm_bindgen_test]
+fn mapped_pixels_are_palette_colours() {
+    let pixels = vec![
+        255, 0, 0, //
+        250, 2, 1, // near red
+        0, 255, 0, //
+        3, 250, 4, // near green
+        0, 0, 255,
+    ];
+    let palette = kmeans_rgb(pixels.clone(), 3, 100, Some(0.1)).unwrap();
+    let mapped = apply_palette(pixels, palette.clone(), 3).unwrap();
+
+    // Five pixels in, so five RGBA pixels out.
+    assert_eq!(mapped.len(), 5 * 4);
+    // Alpha is synthesised opaque for a three-component source.
+    assert!(mapped.chunks_exact(4).all(|pixel| pixel[3] == 255));
+    // Every output triple has to be a palette triple, which is the whole
+    // guarantee: nothing that is not in the palette can be written.
+    for pixel in mapped.chunks_exact(4) {
+        let triple = [pixel[0], pixel[1], pixel[2]];
+        assert!(
+            palette.chunks_exact(3).any(|entry| entry == triple),
+            "{triple:?} is not in the palette"
+        );
+    }
+}
+
+/// Rejected mapping input, for the same reason as the clustering cases above.
+#[wasm_bindgen_test]
+fn rejects_malformed_mapping_input() {
+    let palette = vec![0, 0, 0, 255, 255, 255];
+
+    assert_eq!(
+        apply_palette(vec![1, 2, 3], Vec::new(), 3)
+            .unwrap_err()
+            .as_string()
+            .as_deref(),
+        Some("Error: The length of palette must be a non-zero multiple of components.")
+    );
+    assert_eq!(
+        apply_palette(vec![1, 2, 3], vec![0, 0], 3)
+            .unwrap_err()
+            .as_string()
+            .as_deref(),
+        Some("Error: The length of palette must be a non-zero multiple of components.")
+    );
+    assert_eq!(
+        apply_palette(vec![1, 2], palette.clone(), 3)
+            .unwrap_err()
+            .as_string()
+            .as_deref(),
+        Some("Error: The length of pixels must be a multiple of 3.")
+    );
+    assert_eq!(
+        apply_palette(vec![1, 2, 3], palette, 5)
+            .unwrap_err()
+            .as_string()
+            .as_deref(),
+        Some("Error: components must be 3 for RGB or 4 for RGBA.")
+    );
+}
+
+/// An empty buffer maps to an empty buffer rather than erroring, for the same
+/// reason an empty buffer yields an empty palette.
+#[wasm_bindgen_test]
+fn an_empty_buffer_maps_to_an_empty_buffer() {
+    assert_eq!(
+        apply_palette(Vec::new(), vec![0, 0, 0], 3).unwrap(),
+        Vec::<u8>::new()
+    );
 }

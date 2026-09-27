@@ -53,6 +53,13 @@ jobs:
       - name: Test native build
         run: npm test
 
+      # Playwright's Chromium is used rather than whatever Chrome the image
+      # ships with, because the wasm tests need a chromedriver of the exact same
+      # version and Playwright's builds are always published on Chrome for
+      # Testing. scripts/run-web-tests.mjs fetches the matching one.
+      - name: Install a browser for the wasm tests
+        run: npx playwright install --with-deps chromium
+
       - name: Test WebAssembly build
         run: npm run test:web
 

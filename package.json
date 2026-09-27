@@ -31,12 +31,13 @@
     "release:dry": "release-it --dry-run",
     "release:stage": "node scripts/stage-npm-release.mjs",
     "test": "cargo test --locked",
-    "test:web": "wasm-pack test --chrome --headless",
+    "test:web": "node scripts/run-web-tests.mjs",
     "bench:images": "npm --prefix js_bench run bench:images"
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "^0.18.5",
     "@release-it/bumper": "^8.0.1",
+    "playwright": "^1.63.0",
     "publint": "^0.3.24",
     "release-it": "^21.1.0"
   }

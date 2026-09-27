@@ -55,3 +55,7 @@ wasm-opt = ["-O4", "--enable-simd", "--enable-bulk-memory", "--enable-nontrappin
 [[bench]]
 name = "dedup_probe"
 harness = false
+
+[[bench]]
+name = "mapping_probe"
+harness = false

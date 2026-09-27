@@ -18,6 +18,10 @@ const status = document.querySelector("#status");
 const timingRows = document.querySelector("#timing-rows");
 const timings = [];
 
+// The wasm module, assigned during initialize. It is module scope rather than
+// local to that function because apply_palette is called from here too.
+let wasm = null;
+
 function setStatus(message, isError = false) {
   status.textContent = message;
   status.classList.toggle("error", isError);
@@ -120,57 +124,24 @@ function prepareImage(image) {
   return { rgb, rgba, points, width, height };
 }
 
-function paletteCacheKey(pixels, offset, stride) {
-  if (stride === RGBA_STRIDE) {
-    // A packed 4-byte string keeps the cache lossless; shifting would drop alpha.
-    return String.fromCharCode(
-      pixels[offset],
-      pixels[offset + 1],
-      pixels[offset + 2],
-      pixels[offset + 3],
-    );
-  }
-
-  return (pixels[offset] << 16) | (pixels[offset + 1] << 8) | pixels[offset + 2];
-}
-
-function nearestPaletteOffset(pixels, offset, palette, stride) {
-  let nearest = 0;
-  let nearestDistance = Number.POSITIVE_INFINITY;
-
-  for (let paletteOffset = 0; paletteOffset < palette.length; paletteOffset += stride) {
-    let distance = 0;
-    for (let channel = 0; channel < stride; channel += 1) {
-      const delta = pixels[offset + channel] - palette[paletteOffset + channel];
-      distance += delta * delta;
-    }
-
-    if (distance < nearestDistance) {
-      nearestDistance = distance;
-      nearest = paletteOffset;
-    }
-  }
-
-  return nearest;
-}
-
-function renderPaletteResult(context, width, height, pixels, stride, palette, assignments = null) {
+// Quantizes with the wasm mapping. `apply_palette` resolves each distinct colour
+// to its nearest entry once and then maps every pixel with a table probe, which
+// is the same memoization the Map below did, in wasm and with no per-pixel
+// arithmetic. It returns RGBA, which is exactly what putImageData wants.
+function renderPaletteResult(context, width, height, pixels, stride, palette) {
   const output = context.createImageData(width, height);
-  const cache = new Map();
+  output.data.set(wasm.apply_palette(pixels, palette, stride));
+  context.putImageData(output, 0, 0);
+}
+
+// Quantizes from assignments the caller already has. skmeans returns one index
+// per point, so there is nothing to search for.
+function renderAssignedResult(context, width, height, stride, palette, assignments) {
+  const output = context.createImageData(width, height);
 
   for (let pixel = 0; pixel < width * height; pixel += 1) {
     const outputOffset = pixel * RGBA_STRIDE;
-    const pixelOffset = pixel * stride;
-    let paletteOffset = assignments ? assignments[pixel] * stride : undefined;
-
-    if (paletteOffset === undefined) {
-      const key = paletteCacheKey(pixels, pixelOffset, stride);
-      paletteOffset = cache.get(key);
-      if (paletteOffset === undefined) {
-        paletteOffset = nearestPaletteOffset(pixels, pixelOffset, palette, stride);
-        cache.set(key, paletteOffset);
-      }
-    }
+    const paletteOffset = assignments[pixel] * stride;
 
     for (let channel = 0; channel < RGB_STRIDE; channel += 1) {
       output.data[outputOffset + channel] = palette[paletteOffset + channel];
@@ -231,7 +202,7 @@ function renderTimings() {
 async function initialize() {
   try {
     setStatus("Loading WebAssembly and the comparison image…");
-    const wasm = await import("./wasm/kmeans_wasm.js");
+    wasm = await import("./wasm/kmeans_wasm.js");
     await wasm.default();
     if (typeof window.skmeans !== "function") {
       throw new Error("The skmeans browser bundle did not load.");
@@ -263,11 +234,10 @@ async function initialize() {
     const skmeansRun = measure(() =>
       window.skmeans(points, PALETTE_SIZE, undefined, MAX_ITERATIONS),
     );
-    renderPaletteResult(
+    renderAssignedResult(
       skmeansContext,
       width,
       height,
-      rgb,
       RGB_STRIDE,
       skmeansPalette(skmeansRun.result.centroids),
       skmeansRun.result.idxs,

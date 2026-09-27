@@ -41,6 +41,7 @@ Everything else the module relies on, including bulk memory, reference types, si
 - Hamerly k-means algorithm
 - RGB and RGBA color quantization
 - Reduces packed input to its distinct colors, weighted by how often each occurs, so real images cluster a point set up to 14x smaller than the pixel count
+- Maps a palette back onto an image, also keyed on distinct colors rather than pixels
 - Arbitrary numeric vector spaces
 - SIMD accelerated inner loop, with no `unsafe` and no runtime feature detection
 - JavaScript and TypeScript bindings
@@ -56,14 +57,16 @@ The published package targets JavaScript bundlers and exposes an ES module.
 
 ## Usage
 
-Three entry points, all sharing the same clustering core. Pick the one that matches
-your data layout:
+Three clustering entry points, all sharing the same clustering core, plus a
+mapping entry point that turns a palette back into an image. Pick the one that
+matches your data layout:
 
 | Export | Input | Use it for |
 | --- | --- | --- |
 | `kmeans_rgb` | `Uint8Array`, 3 values per point | image and palette work |
 | `kmeans_rgba` | `Uint8Array`, 4 values per point | the same, when alpha matters |
 | `kmeans` | `Array<Array<number>>` | any other number of dimensions |
+| `apply_palette` | `Uint8Array`, a palette | replacing each pixel with its nearest entry |
 
 The packed entry points take a flat typed array and are several times faster than
 the general one, because nothing has to be copied across the JavaScript boundary
@@ -148,45 +151,33 @@ const quantizedColors = kmeans_rgba(rgba, 3, 1_000, 0.001);
 ### Quantizing an image in the browser
 
 Because `ImageData.data` is already a packed RGBA buffer, the canvas is both the
-input and the output, with no intermediate conversion:
+input and the output, with no intermediate conversion. `apply_palette` does the
+mapping half, and returns RGBA, which is what `putImageData` takes:
 
 ```js
-import { kmeans_rgba } from "kmeans-wasm";
+import { kmeans_rgba, apply_palette } from "kmeans-wasm";
 
 const context = canvas.getContext("2d", { willReadFrequently: true });
 const image = context.getImageData(0, 0, canvas.width, canvas.height);
 
 const palette = kmeans_rgba(image.data, 16, 30, 0.1);
 
-// paint: replace every pixel with its nearest palette entry
 const output = context.createImageData(canvas.width, canvas.height);
-for (let pixel = 0; pixel < canvas.width * canvas.height; pixel += 1) {
-  const source = pixel * 4;
-  const nearest = nearestPaletteEntry(palette, image.data, source);
-  output.data[source] = palette[nearest];
-  output.data[source + 1] = palette[nearest + 1];
-  output.data[source + 2] = palette[nearest + 2];
-  output.data[source + 3] = palette[nearest + 3];
-}
+output.data.set(apply_palette(image.data, palette, 4));
 context.putImageData(output, 0, 0);
-
-function nearestPaletteEntry(palette, pixels, offset) {
-  let best = 0;
-  let bestDistance = Number.POSITIVE_INFINITY;
-  for (let entry = 0; entry < palette.length; entry += 4) {
-    let distance = 0;
-    for (let channel = 0; channel < 4; channel += 1) {
-      const delta = pixels[offset + channel] - palette[entry + channel];
-      distance += delta * delta;
-    }
-    if (distance < bestDistance) {
-      bestDistance = distance;
-      best = entry;
-    }
-  }
-  return best;
-}
 ```
+
+`apply_palette` works by resolving every distinct color to its nearest palette
+entry once, then mapping each pixel with a single table probe, so the cost is
+proportional to the number of *distinct* colors rather than to pixels times
+entries. On the four photographs in `js_bench/images` that is 1.24x to 2.00x
+faster than searching the palette per pixel in JavaScript, and the result is
+byte-identical. A tie goes to the lower palette index, matching the clustering
+core, so a hand-written search with a strict `<` produces the same bytes.
+
+The same function handles the mapping for either stride: pass `3` with
+`kmeans_rgb` and it writes an opaque alpha for you, since a three-component
+palette has none to carry.
 
 Run a full working version, including a three-way speed comparison against
 `kmeans_rgb` and `skmeans`, at
@@ -194,7 +185,7 @@ Run a full working version, including a three-way speed comparison against
 
 ### Arguments and errors
 
-All three entry points throw a `string` on invalid input, so `try`/`catch` and
+All entry points throw a `string` on invalid input, so `try`/`catch` and
 `String(error)` are enough to report a problem:
 
 - `k` must be at least 2
@@ -202,6 +193,8 @@ All three entry points throw a `string` on invalid input, so `try`/`catch` and
 - `convergenceThreshold` must not be negative
 - `kmeans_rgb` and `kmeans_rgba` need a length that is a multiple of 3 or 4
 - `kmeans` needs every point to have the same dimension
+- `apply_palette` needs a component count of 3 or 4, a `pixels` length that is a
+  multiple of it, and a non-empty `palette` that is also a multiple of it
 
 `kmeans_rgb` and `kmeans_rgba` default `convergenceThreshold` to `0.1`,
 which is below the resolution of the `u8` result, so a round is only worth

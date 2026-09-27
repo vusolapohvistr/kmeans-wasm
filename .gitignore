@@ -8,3 +8,7 @@ wasm-pack.log
 .DS_Store
 kmeans-wasm-node
 *.tgz
+
+# browser test tooling, fetched by scripts/run-web-tests.mjs
+.browsers/
+webdriver.json
