@@ -4,100 +4,31 @@ A fast k-means clustering implementation written in Rust and compiled to WebAsse
 
 ## Credits
 
-This library would not exist without the researchers whose work it builds on. Every
-algorithmic idea here is someone else's, reimplemented and tuned.
+The clustering core is Hamerly k-means, from Grant Hamerly and Charles Elkan,
+*Efficient Algorithms for Clustering with Bounds*, *Data Mining and Knowledge
+Discovery* 24(3), 581-606, 2010. It accelerates the iteration Stuart Lloyd
+described in *Least Squares Quantization in PCM*, *IEEE Transactions on
+Information Theory* 28(2), 129-137, 1982, [doi][lloyd].
 
-**The clustering core.** The algorithm is Hamerly k-means, from Grant Hamerly and
-Charles Elkan, *Efficient Algorithms for Clustering with Bounds*, *Data Mining and
-Knowledge Discovery* 24(3), 2010, doi `10.1007/s10618-009-0516-5`. Each point keeps
-a lower bound on the distance to its second-closest centroid, and the centroids' own
-movement tightens those bounds by the triangle inequality, so most centroids are
-never measured at all. This is the entire reason the implementation is fast.
-
-The loop it accelerates is Stuart Lloyd's, *Least Squares Quantization in PCM*,
-*IEEE Transactions on Information Theory* 28(2), 1982, [doi][lloyd]: assign every
-point to the nearest centroid, then move each centroid to the mean of its members.
-Hamerly's bounds avoid most of the distance measurements in that loop and nothing
-else. The direct ancestor is Charles Elkan, *Using the Triangle Inequality to
-Accelerate k-Means*, *ICML* 2004, which stores a bound per centroid per point
-instead of one per point.
-
-**Alternatives measured and rejected.** Hamerly's bounds are the cheapest in memory
-of the stored-bounds family, keeping one bound per point where Elkan keeps one per
-centroid per point, and that is what makes them fast rather than fast *and* small.
-Two exact algorithms benchmark ahead of it anyway: Christoph Borgelt's *Even Faster
-Exact k-Means Clustering*, *IDA* 2020, [doi][borgelt], and Aurélien Newling and
-François Fleuret's *Fast k-Means with Accurate Bounds*, *MLG* 2016, in [*PMLR*
-v48][newling], which report roughly 1.3x to 3x over Hamerly. A recent idea worth
-revisiting is Max Pernklau and Nikita Averitchev,
-*Extending k-Means Clustering with Ptolemy's Inequality*, *BTW* 2025, [open
-access][ptolemy]: Ptolemy's inequality gives tighter bounds than the triangle
-inequality, and the gains grow with the cluster count and as dimension falls, which
-is the shape of the packed color workload. None of these were ported, because this
-implementation already spends only about 14% of a full distance scan per round, so
-the extra bound arithmetic they add plausibly costs more than the distances they
-save. The measurements behind that decision are in `AGENTS.md`.
-
-**Seeding.** David Arthur and Sergei Vassilvitskii, *k-means++: the Advantages of
-Careful Seeding*, *SODA* 2007, [PDF][arthur], is the standard better seeding
-scheme. It was implemented and measured here, and rejected: it improved the median
-iteration count on three of four shapes and worsened it on one, all within a few
-percent, while costing about 7% per run. Some of the speedup in the current version
-comes from not paying for it.
-
-**Color quantization.** M. Emre Celebi, *Improving the Performance of K-Means for
-Color Quantization*, [arXiv:1101.0395][celebi], and *Fast Color Quantization Using
-Weighted Sort-Means Clustering*, *JOSA A* 26(11), 2009, [doi][celebi2]. The
-observation that clustering an image's distinct colors with weights, rather than
-every pixel, gives the same result, and the standard test images there are 7% to
-58% distinct, so the point set shrinks by up to 14x before any clustering happens.
-
-That reduction is what `kmeans_rgb` and `kmeans_rgba` now do, and it is a large
-part of why the real-image table below is much faster than the random-pixel one.
-It is exact rather than approximate: the two forms accumulate the cluster sums in
-different orders, which normally changes the last bits of a centroid, but every
-`u8` value and every partial sum is a small integer, well inside the range where
-`f64` is exact, and integer addition is associative. So the collapsed path returns
-bit-identical centroids, verified from 20 random starting points.
-
-**A plausible reference that turned out to be the wrong one.** Tai Dinh, Wong
-Hauchi, Philippe Fournier-Viger, Daniil Lisik, Minh-Quyet Ha, Hieu-Chi Dam and
-Van-Nam Huynh, *Categorical Data Clustering: 25 Years Beyond k-Modes*,
-[arXiv:2408.17244][categorical], accepted at *Expert Systems with Applications*,
-is the obvious reference for a library that
-takes `u8` values. It is the wrong one. Its dissimilarity measures are nominal,
-simple matching above all, which treats a difference of 1 in red and a difference of
-1 in blue as equally far. RGB is discrete but still metric, so Euclidean is correct
-and Hamming would degrade the palette.
-
-**Not used.** Theodore Elfving and Einar Carlsson, *Efficient Algorithms for Gaussian
-Mixture Models in the EM Algorithm*, *SIAM Journal on Matrix Analysis and
-Applications* 17(2), 2005, doi `10.1137/S0895479897328291`, describes the
-conjugate-gradient step that accelerates Lloyd's iteration. It is the most promising
-known way to cut this library's iteration count, and it is not implemented.
+Reducing packed input to its distinct colors before clustering follows M. Emre
+Celebi, *Fast Color Quantization Using Weighted Sort-Means Clustering*, *JOSA A*
+26(11), 2009, [doi][celebi2], and *Improving the Performance of K-Means for Color
+Quantization*, [arXiv:1101.0395][celebi].
 
 [lloyd]: https://doi.org/10.1109/TIT.1982.1056489
-[arthur]: https://theory.stanford.edu/~sergei/papers/kMeansPP-soda.pdf
 [celebi]: https://arxiv.org/abs/1101.0395
 [celebi2]: https://doi.org/10.1364/JOSAA.26.002434
-[borgelt]: https://doi.org/10.1007/978-3-030-44584-3_8
-[newling]: https://proceedings.mlr.press/v48/
-[ptolemy]: https://dl.gi.de/items/e0507a05-fc07-45fb-b5b8-06e50def5007
-[categorical]: https://arxiv.org/abs/2408.17244
 
 ## A note on how this was written
 
 From version **3.2.0** onward, most of the work on this library was done by AI
 assistants: the SIMD kernel, the allocation and distance-evaluation work, the
 color quantization entry point, the benchmark harnesses, the playground, the
-regression tests, and the bug fixes. That work is only possible because the
-researchers listed above had already done the hard part, and the results in the
-tables below are reported as carefully as the tools allowed so the claims can be
-checked rather than taken on trust.
+regression tests, and the bug fixes.
 
-The people behind those papers deserve the credit, and the bugs in this library
-are the AI's. Please cite them, not this repository, when describing the
-algorithm.
+That work is only possible because the researchers credited above had already done
+the hard part. Please cite them, not this repository, when describing the
+algorithm. The bugs in this library are the AI's.
 
 ## Requirements
 
