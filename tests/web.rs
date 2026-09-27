@@ -147,7 +147,7 @@ fn rejects_invalid_clustering_arguments() {
 /// they can only be asserted here.
 #[wasm_bindgen_test]
 fn rejects_malformed_packed_input() {
-    for bad in [vec![], vec![10, 20], vec![10, 20, 30, 40]] {
+    for bad in [vec![10, 20], vec![10, 20, 30, 40]] {
         let error = kmeans_rgb(bad.clone(), 2, 100, Some(0.1)).unwrap_err();
         assert_eq!(
             error.as_string().as_deref(),
@@ -164,6 +164,22 @@ fn rejects_malformed_packed_input() {
             "for {bad:?}"
         );
     }
+}
+
+/// An empty buffer is *not* rejected, which is worth pinning down rather than
+/// assuming. A length of zero is a multiple of both three and four, so it passes
+/// validation, and there are no pixels to cluster, so the result is an empty
+/// palette rather than an error.
+#[wasm_bindgen_test]
+fn an_empty_buffer_returns_an_empty_palette() {
+    assert_eq!(
+        kmeans_rgb(Vec::new(), 2, 100, Some(0.1)).unwrap(),
+        Vec::<u8>::new()
+    );
+    assert_eq!(
+        kmeans_rgba(Vec::new(), 2, 100, Some(0.1)).unwrap(),
+        Vec::<u8>::new()
+    );
 }
 
 /// A single pixel is a valid triple, so it is accepted even though it holds one
