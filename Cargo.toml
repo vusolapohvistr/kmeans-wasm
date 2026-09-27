@@ -5,7 +5,7 @@ counters = []
 
 [package]
 name = "kmeans-wasm"
-version = "3.6.0"
+version = "3.7.0"
 authors = ["Serhii Pylypchuk <sergiydjan@gmail.com>"]
 edition = "2024"
 rust-version = "1.98"
