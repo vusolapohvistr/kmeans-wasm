@@ -149,17 +149,19 @@ fn rejects_invalid_clustering_arguments() {
 fn rejects_malformed_packed_input() {
     for bad in [vec![], vec![10, 20], vec![10, 20, 30, 40]] {
         let error = kmeans_rgb(bad.clone(), 2, 100, Some(0.1)).unwrap_err();
-        assert!(
-            String::from_js_value(&error).contains("multiple of 3"),
-            "unexpected message for {bad:?}"
+        assert_eq!(
+            error.as_string().as_deref(),
+            Some("Error: The length of rgb_slice must be a multiple of 3."),
+            "for {bad:?}"
         );
     }
 
     for bad in [vec![1, 2, 3, 4, 5], vec![1, 2, 3]] {
         let error = kmeans_rgba(bad.clone(), 2, 100, Some(0.1)).unwrap_err();
-        assert!(
-            String::from_js_value(&error).contains("multiple of 4"),
-            "unexpected message for {bad:?}"
+        assert_eq!(
+            error.as_string().as_deref(),
+            Some("Error: The length of rgba_slice must be a multiple of 4."),
+            "for {bad:?}"
         );
     }
 }
