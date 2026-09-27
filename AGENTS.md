@@ -29,6 +29,7 @@ benches/kmeans_rgb.rs      native Criterion bench, packed 3-component
 benches/kmeans_rgba.rs     native Criterion bench, packed 4-component
 benches/dedup_probe.rs     where the reduction to distinct colours starts paying
 benches/mapping_probe.rs   where the palette map beats a per-pixel search
+benches/work_split.rs     how much of a round is distances and how much is bounds
 js_bench/src/rgb.ts        Node harness: kmeans_rgb vs skmeans
 js_bench/src/vector.ts     Node harness: kmeans vs skmeans vs kmeans_rgb
 js_bench/src/images.ts     Node harness: the four test photographs
@@ -37,6 +38,7 @@ scripts/                   npm package finalizer, npm staging helper
 scripts/check-page.mjs     runs docs/app.js headless and checks what it painted
 scripts/run-web-tests.mjs  finds or fetches a browser and driver for test:web
 scripts/probe-gpu-mapping.mjs  checks a WGSL mapping kernel against apply_palette
+scripts/probe-wgsl-precision.mjs  asks whether WGSL can match the f64 core
 tests/web.rs               wasm-only tests (browser)
 tests/quantize.rs          native tests for the packed paths
 tests/histogram.rs         native tests for the reduction
@@ -544,6 +546,59 @@ read exactly like a broken GPU kernel. And a buffer created with `UNIFORM` but n
 kernel's guard returns before writing and the readback is all zeros. The first was
 mine in a `page.evaluate`; the second is the documented failure mode and I hit it
 anyway.
+
+## A GPU distance pass is blocked by WGSL having no f64, not by the algorithm
+
+The obvious shape of a GPU split is sound and worth writing down, because it is
+the shape everyone will think of. Hamerly already narrows each point to a couple
+of candidate centroids per round, so let the CPU prepare the list of distance
+evaluations and batch them onto a shader. Distances are order-independent and
+embarrassingly parallel, so unlike the bounds and the cluster sums they could move
+without changing a bit. The sums are added in ascending point order and that is
+precisely what makes the centroids stable, so they can never move.
+
+**How much there is to move, measured.** `benches/work_split.rs` counts rather
+than times, because counts are exact. On 307,200 pixels at k=32 the distance pass
+is 83% to 90% of the modelled work across distinct shares from 1.3% to 64%, and
+a round costs 3.9 distance evaluations per point against Lloyd's 32. So the
+GPU-able share is large and the idea is not silly. The `gpu_share` column is a
+model with stated per-operation weights; the counts beside it are the part to
+trust.
+
+**The blocker is the language, not the algorithm.** WGSL has no `f64`. Asking the
+compiler is the only reliable way to know: `unresolved type 'f64'`, and even
+`enable f16` is refused unless the adapter advertises it. So a shader can only
+compute in `f32`, and the core keeps every distance in `f64`.
+
+**And `f32` is not close enough, because the centroids are means.** All 96
+components of the centroids the algorithm actually compares against are *not*
+exactly representable in `f32`, because they are sums divided by counts. The
+distance value differs on 100% of sampled points as a result. The chosen
+centroid happened not to change on any of 20,000 sampled points, which is
+reassuring and not sufficient: Hamerly builds `upper_bound` from the square root
+of the distance and the convergence test compares a sum of squared movements
+against a threshold, so a value that differs in the last bits can change which
+branch a bound test takes and whether the run stops on round 96 or 97. **Value
+equality is the invariant, not argmin equality**, and `f32` does not have it.
+
+**An earlier version of this measurement got the wrong answer and looked
+encouraging.** It compared `f32` against the centroids `kmeans_rgb` *returns*,
+which are `u8`, and therefore exactly representable in `f32`, and reported zero
+disagreement. The values the algorithm uses are the `f64` means on the way there.
+Worth remembering as a variant of the usual trap: a golden value that is too
+convenient will agree with anything.
+
+**What it would be worth if the invariant could be relaxed.** Not nothing: with
+the GPU returning only a verdict per point, an argmin and a distance, a round
+costs about 1.1 MB of readback rather than the 4.4 MB of raw distances, and on
+Chrome the 200 dispatches add about 6 ms against 135 to 223 ms of CPU work, so
+2x to 4x is plausible. It is not measurable here for the reason above. Against
+that: Firefox's measured 1038.7 μs dispatch cost puts 200 dispatches at 208 ms,
+more than the entire CPU run, so it would be a browser-specific path; the values
+would differ from the CPU path, so a consumer getting either one sees palette
+drift; and it needs a second implementation plus a fallback. Deciding that is a
+judgement about the invariant, not a measurement, and it is not mine to make
+unilaterally.
 
 ## The wasm suite runs locally now
 
