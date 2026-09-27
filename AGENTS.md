@@ -124,11 +124,13 @@ There are two places, and they are not the same thing:
   are needed. Binaryen 117 has sign-extension and reference types on by default,
   so those two flags were removed; the build still produces a byte-identical
   artifact (md5 `28866c3322ee41328ab582ed7d41e011`, 34,016 bytes at the time)
-  without them. The current artifact is larger and is expected to be: adding
-  `apply_palette` in 3.6.0 took it to 41,270 bytes, md5
-  `5d1628a94991c3910a36fe4489629f8c`, for 7,254 bytes of added entry point. The
-  hash is only comparable against another build of the same commit, so treat it
-  as a fingerprint rather than a target.
+  without them. The current artifact is larger and is expected to be: the
+  unreleased `apply_palette` took it to 41,270 bytes, md5
+  `5d1628a94991c3910a36fe4489629f8c`, which is 7,254 bytes for a whole new entry
+  point. A caller who never maps pays that in download size, since the wasm
+  module is one file and cannot be tree-shaken. The hash is only comparable
+  against another build of the same commit, so treat it as a fingerprint rather
+  than a target.
 
 When changing either list, rebuild and compare the artifact hash. A flag that is
 redundant must not change the output; if it does, it was doing something.
