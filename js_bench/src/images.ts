@@ -27,13 +27,16 @@ const WARMUPS = 2;
 const CLUSTER_COUNTS = [8, 16, 32, 64];
 
 /**
- * skmeans is a JavaScript implementation taking `number[][]`, so it cannot be
- * run over a whole photograph in reasonable time: at 922,560 points and 64
- * clusters over 100 iterations that is billions of interpreted distance
- * evaluations. It is timed over a fixed evenly spaced subsample instead, which is
- * reported in its own column and is not comparable to the full-image columns.
+ * skmeans gets its own, much smaller repeat count.
+ *
+ * On a megapixel it takes 2 seconds at k=8 and 12 at k=32, so the usual eight
+ * measured runs after two warm-ups would be twenty minutes per image. Two runs is
+ * enough to have a warm-up and a sample, and the sample is seconds long rather
+ * than milliseconds, so the relative noise is much lower than the absolute
+ * numbers suggest. The counts are reported with the table rather than hidden.
  */
-const SKMEANS_SUBSAMPLE = 8_000;
+const SKMEANS_REPEATS = 1;
+const SKMEANS_WARMUPS = 1;
 
 const IMAGE_DIRECTORY = join(__dirname, "..", "images");
 
@@ -44,7 +47,6 @@ interface Loaded {
   rgba: Uint8Array;
   points: number[][];
   distinct: number;
-  subsample: number[][];
 }
 
 interface Row {
@@ -54,7 +56,7 @@ interface Row {
   colors: number;
   rgbMs: number;
   rgbaMs: number;
-  skmeansSubsampleMs: number;
+  skmeansMs: number;
 }
 
 function median(values: number[]): number {
@@ -62,17 +64,21 @@ function median(values: number[]): number {
   return sorted[Math.floor(sorted.length / 2)];
 }
 
-function measure(operation: () => unknown): number {
-  for (let index = 0; index < WARMUPS; index += 1) {
+function measureWith(warmups: number, repeats: number, operation: () => unknown): number {
+  for (let index = 0; index < warmups; index += 1) {
     operation();
   }
   const samples: number[] = [];
-  for (let index = 0; index < REPEATS; index += 1) {
+  for (let index = 0; index < repeats; index += 1) {
     const start = performance.now();
     operation();
     samples.push(performance.now() - start);
   }
   return median(samples);
+}
+
+function measure(operation: () => unknown): number {
+  return measureWith(WARMUPS, REPEATS, operation);
 }
 
 function load(name: string): Loaded {
@@ -103,13 +109,7 @@ function load(name: string): Loaded {
     seen.add((r << 16) | (g << 8) | b);
   }
 
-  const stride = Math.max(1, Math.floor(pixels / SKMEANS_SUBSAMPLE));
-  const subsample: number[][] = [];
-  for (let index = 0; index < pixels; index += stride) {
-    subsample.push(points[index]);
-  }
-
-  return { name, pixels, rgb, rgba, points, distinct: seen.size, subsample };
+  return { name, pixels, rgb, rgba, points, distinct: seen.size };
 }
 
 const images = readdirSync(IMAGE_DIRECTORY)
@@ -137,8 +137,10 @@ for (const image of images) {
     const rgbaMs = measure(() =>
       kmeans_rgba(image.rgba, colors, MAX_ITERATIONS, CONVERGENCE_THRESHOLD),
     );
-    const skmeansSubsampleMs = measure(() =>
-      skmeans(image.subsample, colors, RANDOM_SEEDING, MAX_ITERATIONS),
+    const skmeansMs = measureWith(
+      SKMEANS_WARMUPS,
+      SKMEANS_REPEATS,
+      () => skmeans(image.points, colors, RANDOM_SEEDING, MAX_ITERATIONS),
     );
     rows.push({
       image: image.name.replace(/\.jpg$/, ""),
@@ -147,7 +149,7 @@ for (const image of images) {
       colors,
       rgbMs,
       rgbaMs,
-      skmeansSubsampleMs,
+      skmeansMs,
     });
   }
 }
@@ -161,23 +163,23 @@ console.table(
     colors: row.colors,
     "kmeans_rgb (ms)": Number(row.rgbMs.toFixed(2)),
     "kmeans_rgba (ms)": Number(row.rgbaMs.toFixed(2)),
-    "skmeans 8k (ms)": Number(row.skmeansSubsampleMs.toFixed(2)),
+    "skmeans (ms)": Number(row.skmeansMs.toFixed(2)),
   })),
 );
 
 console.log("\nMarkdown table");
 console.log(
-  "| Image | Pixels | Distinct | Colors | kmeans_rgb | kmeans_rgba | skmeans (8k subsample) |",
+  "| Image | Pixels | Distinct | Colors | kmeans_rgb | kmeans_rgba | skmeans | Speed-up |",
 );
-console.log("| --- | ---: | ---: | ---: | ---: | ---: | ---: |");
+console.log("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |");
 for (const row of rows) {
   console.log(
-    `| ${row.image} | ${row.pixels.toLocaleString("en-US")} | ${row.distinctShare.toFixed(1)}% | ${row.colors} | ${row.rgbMs.toFixed(2)} ms | ${row.rgbaMs.toFixed(2)} ms | ${row.skmeansSubsampleMs.toFixed(2)} ms |`,
+    `| ${row.image} | ${row.pixels.toLocaleString("en-US")} | ${row.distinctShare.toFixed(1)}% | ${row.colors} | ${row.rgbMs.toFixed(2)} ms | ${row.rgbaMs.toFixed(2)} ms | ${row.skmeansMs.toFixed(2)} ms | ${(row.skmeansMs / row.rgbMs).toFixed(1)}x |`,
   );
 }
 console.log(
   `\nMedian of ${REPEATS} runs after ${WARMUPS} warm-ups; max iterations: ${MAX_ITERATIONS}; convergence threshold: ${CONVERGENCE_THRESHOLD}, because skmeans has no threshold parameter.`,
 );
 console.log(
-  "The skmeans column is a subsample and is not comparable to the full-image columns.",
+  `Every column is a full-image measurement of the same pixels. kmeans-wasm is the median of ${REPEATS} runs after ${WARMUPS} warm-ups; skmeans is the median of ${SKMEANS_REPEATS} after ${SKMEANS_WARMUPS}, because it costs seconds per run on a megapixel.`,
 );

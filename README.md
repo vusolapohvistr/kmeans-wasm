@@ -281,35 +281,38 @@ entry points reduce the input to its distinct colors before clustering, so the
 random-pixel tables are close to the worst case for them and these are the
 representative ones.
 
-`skmeans` is a JavaScript implementation taking `number[][]`, so it cannot be run
-over a whole photograph in reasonable time. Its column is a fixed 8,000 pixel
-subsample and is **not** comparable to the full-image columns; the other two
-columns are.
+Every column below is a full-image measurement of the same pixels, so they can be
+compared directly. `skmeans` gets fewer repeats, one measured run after one warm-up
+rather than eight after two, because it costs seconds per run on a megapixel where
+this library costs milliseconds; the sample is seconds long, so the relative noise
+is much lower than the absolute figures suggest.
 
-| Image | Pixels | Distinct | Colors | `kmeans_rgb` | `kmeans_rgba` | `skmeans` (8k subsample) |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| blue-marble | 922,560 | 6.2% | 8 | 57.29 ms | 54.10 ms | 26.96 ms |
-| blue-marble | 922,560 | 6.2% | 16 | 112.61 ms | 107.21 ms | 62.46 ms |
-| blue-marble | 922,560 | 6.2% | 32 | 160.13 ms | 149.31 ms | 68.14 ms |
-| blue-marble | 922,560 | 6.2% | 64 | 269.86 ms | 245.98 ms | 91.19 ms |
-| city | 307,200 | 45.8% | 8 | 149.17 ms | 156.91 ms | 16.36 ms |
-| city | 307,200 | 45.8% | 16 | 216.09 ms | 210.94 ms | 40.19 ms |
-| city | 307,200 | 45.8% | 32 | 336.88 ms | 322.92 ms | 81.59 ms |
-| city | 307,200 | 45.8% | 64 | 634.86 ms | 614.19 ms | 127.56 ms |
-| coast | 307,200 | 30.5% | 8 | 93.31 ms | 92.63 ms | 18.14 ms |
-| coast | 307,200 | 30.5% | 16 | 149.45 ms | 144.17 ms | 47.82 ms |
-| coast | 307,200 | 30.5% | 32 | 259.77 ms | 251.69 ms | 106.42 ms |
-| coast | 307,200 | 30.5% | 64 | 480.97 ms | 441.11 ms | 143.30 ms |
-| harbour | 307,200 | 36.6% | 8 | 104.93 ms | 103.64 ms | 14.05 ms |
-| harbour | 307,200 | 36.6% | 16 | 143.16 ms | 137.16 ms | 27.15 ms |
-| harbour | 307,200 | 36.6% | 32 | 291.68 ms | 274.22 ms | 71.95 ms |
-| harbour | 307,200 | 36.6% | 64 | 506.94 ms | 470.41 ms | 123.64 ms |
+| Image | Pixels | Distinct | Colors | `kmeans_rgb` | `kmeans_rgba` | `skmeans` | Speed-up |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| blue-marble | 922,560 | 6.2% | 8 | 56.11 ms | 56.32 ms | 3905.20 ms | 69.0× |
+| blue-marble | 922,560 | 6.2% | 16 | 109.24 ms | 108.40 ms | 11133.62 ms | 101.8× |
+| blue-marble | 922,560 | 6.2% | 32 | 154.17 ms | 153.15 ms | 13079.75 ms | 83.7× |
+| blue-marble | 922,560 | 6.2% | 64 | 267.45 ms | 241.97 ms | 24919.62 ms | 95.0× |
+| city | 307,200 | 45.8% | 8 | 153.04 ms | 151.03 ms | 971.58 ms | 6.0× |
+| city | 307,200 | 45.8% | 16 | 211.08 ms | 201.75 ms | 2331.48 ms | 11.2× |
+| city | 307,200 | 45.8% | 32 | 336.55 ms | 335.36 ms | 4422.78 ms | 13.1× |
+| city | 307,200 | 45.8% | 64 | 657.36 ms | 600.77 ms | 8133.54 ms | 13.2× |
+| coast | 307,200 | 30.5% | 8 | 91.60 ms | 93.07 ms | 765.01 ms | 7.5× |
+| coast | 307,200 | 30.5% | 16 | 150.72 ms | 147.46 ms | 2358.21 ms | 15.8× |
+| coast | 307,200 | 30.5% | 32 | 265.74 ms | 241.57 ms | 4407.00 ms | 17.3× |
+| coast | 307,200 | 30.5% | 64 | 474.47 ms | 465.97 ms | 8149.37 ms | 17.2× |
+| harbour | 307,200 | 36.6% | 8 | 102.03 ms | 102.34 ms | 800.26 ms | 7.8× |
+| harbour | 307,200 | 36.6% | 16 | 142.86 ms | 135.50 ms | 2116.45 ms | 14.7× |
+| harbour | 307,200 | 36.6% | 32 | 291.07 ms | 264.26 ms | 4176.57 ms | 14.3× |
+| harbour | 307,200 | 36.6% | 64 | 524.26 ms | 485.55 ms | 7993.00 ms | 15.5× |
 
 Read the `Distinct` column against the timings. `blue-marble` is 6.2% distinct, so
-it reaches the clustering as 57,086 weighted values instead of 922,560 pixels and
-quantizes a megapixel in 160 ms at 32 colours. `city` is 45.8% distinct, so almost
-half its colours are unique and there is much less to collapse: 307,200 pixels take
-337 ms at the same 32 colours, more than twice the time for three times the data.
+it reaches the clustering as 57,086 weighted values rather than 922,560 pixels, and
+`skmeans` — which does the full `n * k` scan every round — takes 13 seconds where
+this takes 154 ms. `city` is 45.8% distinct, so there is far less to collapse: at
+32 colours its 307,200 pixels take 337 ms, more than twice as long as three times
+the pixel count, and the speed-up falls from 84x to 13x. The ratio tracks how
+compressible the image is, which is the whole mechanism.
 
 ## Contributing
 

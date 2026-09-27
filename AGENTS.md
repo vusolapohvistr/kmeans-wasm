@@ -352,6 +352,13 @@ result, and `kmeans` still defaults to `0.0`. Two things to keep in mind:
   values, not percentages of a possibly-tiny reference.
 - **`harness = false` plus `test = true` on a bench makes `cargo test` run the whole
   benchmark in a debug build.** It looks exactly like a hang.
+- **A comparison table is only worth having if its columns are comparable.** The
+  real-image harness originally reported `skmeans` on an 8,000 pixel subsample
+  beside two full-image columns, with a footnote admitting the subsample was not
+  comparable. That is worse than no column: it invites a comparison that does not
+  hold. `skmeans` turns out to run the whole megapixel in 2 seconds at k=8 and 12
+  at k=32, so it is now measured on the same pixels with its own, smaller repeat
+  count, stated in the table.
 - **A benchmark's "random" data has to be checked.** Both harnesses generated pixels
   from the low byte of a 32-bit LCG, whose low bits have a period of 256, so the
   tables were measuring a 256-colour repeating pattern while labelled random. Nothing
