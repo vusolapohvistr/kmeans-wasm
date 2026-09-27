@@ -35,6 +35,8 @@ js_bench/src/images.ts     Node harness: the four test photographs
 docs/                      GitHub Pages playground (index.html, app.js, styles.css)
 scripts/                   npm package finalizer, npm staging helper
 scripts/check-page.mjs     runs docs/app.js headless and checks what it painted
+scripts/run-web-tests.mjs  finds or fetches a browser and driver for test:web
+scripts/probe-gpu-mapping.mjs  checks a WGSL mapping kernel against apply_palette
 tests/web.rs               wasm-only tests (browser)
 tests/quantize.rs          native tests for the packed paths
 tests/histogram.rs         native tests for the reduction
@@ -495,6 +497,51 @@ Release page for manual confirmation; with a repo-scoped token set, the Release 
 created automatically. Do not commit `.npmrc` or tokens. If a token is needed, use
 an npm granular access token with **Read and write (stage only)** permissions for
 `kmeans-wasm`, and never a bypass-2FA token for direct publishing.
+
+## WebGPU: the mapping is feasible and not worth doing, and both halves are now measured
+
+`scripts/probe-gpu-mapping.mjs` runs a WGSL compute kernel that maps a palette
+onto an image and checks it against `apply_palette`. Two questions, and the
+second one settles it.
+
+**A GPU mapping kernel can be byte-identical, and is.** On all four photographs at
+k=32, every one of 1,844,960 pixels matches `apply_palette` exactly. It needs a
+strict `<` scanning entries in ascending order, so a tie lands on the lower
+entry, and integer arithmetic, which is exact for `u8` input for the same reason
+the clustering reduction is. So the correctness bar is met, and it was never the
+interesting question.
+
+**The ceiling is 1.05x to 1.10x, because mapping is only 5% to 9% of the work.**
+That is the finding, and it is a consequence of `apply_palette` existing. Mapping
+is 12 to 16 ms against 135 to 223 ms of clustering, so making mapping *free* buys
+almost nothing. Before the reduction and the mapping existed, mapping was the
+obvious target; it no longer is. For this to be worth shipping it would have to be
+worth more than 9% of the pipeline, and it is not.
+
+**Clustering on the GPU is still the large prize, and it is still blocked.** It is
+85% to 95% of the time. Two reasons, both structural. There is no grid-wide
+barrier in WebGPU (gpuweb#862), so every Hamerly round needs at least two
+dispatches and a host round trip: 96 rounds on blue-marble is 192 dispatches,
+about 5.8 ms of pure overhead on Chrome and 199 ms on Firefox at the 1038.7 μs
+dispatch cost measured in arXiv 2604.02344, which is more than the entire CPU run.
+And the reductions reorder the sums, so the centroids stop being bit-identical,
+which breaks the one invariant that matters most here.
+
+**Speed cannot be measured in this environment, and a probe that says otherwise is
+wrong.** There is no hardware adapter: `requestAdapter` returns null without
+`--enable-unsafe-webgpu`, and with it the adapter is always SwiftShader, at
+3.7 to 4.8 ms for a million trivial invocations against roughly 15 μs for real
+hardware. The `gpu_ms` column in the probe is a floor, and the script says so.
+
+**Two harness bugs here are worth remembering, because both looked like the code
+under test being broken.** A `u32`-per-pixel buffer is *not* a tightly packed RGB
+byte stream: passing one to a 3-component entry point reads every pixel three
+bytes out of step, which produced 93% mismatches against a correct reference and
+read exactly like a broken GPU kernel. And a buffer created with `UNIFORM` but not
+`COPY_DST` fails its `writeBuffer` silently, leaving the count at zero, so the
+kernel's guard returns before writing and the readback is all zeros. The first was
+mine in a `page.evaluate`; the second is the documented failure mode and I hit it
+anyway.
 
 ## The wasm suite runs locally now
 
