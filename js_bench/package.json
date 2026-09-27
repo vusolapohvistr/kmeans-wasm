@@ -23,14 +23,17 @@
     "generate:wasm": "cd .. && wasm-pack build --release --target nodejs --out-dir kmeans-wasm-node && cd js_bench && npm install",
     "bench:rgb": "npm run build && node build/rgb.js",
     "bench:kmeans": "npm run build && node build/vector.js",
-    "start": "npm run build && node build/vector.js && node build/rgb.js",
-    "test": "tsc --noEmit"
+    "start": "npm run build && node build/vector.js && node build/rgb.js && node build/images.js",
+    "test": "tsc --noEmit",
+    "bench:images": "npm run build && node build/images.js"
   },
   "dependencies": {
+    "jpeg-js": "^0.4.4",
     "kmeans-wasm": "file:../kmeans-wasm-node",
     "skmeans": "^0.11.3"
   },
   "devDependencies": {
+    "@types/node": "^26.6.3",
     "@types/skmeans": "^0.11.8",
     "typescript": "^7.0.2"
   }

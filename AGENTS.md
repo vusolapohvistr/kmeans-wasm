@@ -288,26 +288,36 @@ values, and it is a dead end: k-modes and its descendants use nominal dissimilar
 such as simple matching, which rates a difference of 1 in red and a difference of 1
 in blue as equally far. RGB is discrete but still metric.
 
-**The one large win found, and why it was not shipped.** Celebi's weighted
-sort-means (arXiv 1101.0395) reduces the input to its distinct colours with weights,
-which is exact because equal points are interchangeable. A prototype reached **16x
-to 78x** on flat-region input and 34x to 63x on a smooth gradient, with a bail-out
-that kept incompressible input within 1% to 4% of the uncollapsed path. It was
-dropped rather than shipped, for three reasons worth remembering:
+**The one large win, now shipped.** Celebi's weighted sort-means (arXiv 1101.0395)
+reduces the input to its distinct values with weights, which is exact because equal
+points are interchangeable. `src/packed_histogram.rs` does this for the packed entry
+points. Two things were needed to make it trustworthy, and both took a measurement
+first:
 
-- **The published benchmark data is the worst case for it.** The harness generates
-  uniform random pixels, which are 99.1% distinct, so the tables would have shown a
-  small regression while every real input got much faster. The real photographs in
-  Celebi's set are 7% to 58% distinct.
-- **It changes output on duplicated input** by up to 13% inertia, because the
-  collapsed and full paths cannot share a random seed without an API change. The
-  paper's "identical results" claim assumes the same initial centres. Summation
-  order also differs, so the fingerprint would have to be re-recorded.
-- **The bail-out threshold was not fully understood** when the prototype was
-  dropped. A sample-based pre-check was still declining the collapse on input with
-  50% distinct values, and that was never diagnosed.
+- **The seed draw has to be weight-proportional, or the reduction quietly changes
+  quality.** Drawing uniformly from the distinct values treats a colour seen once
+  as likely as one seen ten thousand times. Sampling by weight through an inverse
+  CDF on a cumulative table makes the distribution *identical* to drawing pixels
+  uniformly, which is what the uncollapsed path does.
+- **The exactness is bit-for-bit, and the reason is worth remembering.** The core
+  sums `w * v` once per distinct value here and `1 * v` once per pixel otherwise, so
+  the two accumulate in different orders, which normally changes the last bits. It
+  cannot here: every `u8` value and every partial sum is a small integer, far below
+  the 2^53 where `f64` stops being exact, and integer addition is associative. So no
+  fingerprint re-record is needed. This does **not** extend to `f64` input, and the
+  general `kmeans` API has nothing to collapse anyway.
 
-If it is ever revisited, the shared-seeding problem is the blocker to solve first.
+Measured on 480,000 pixels: 4.9x at 25% distinct, 12.7x at 10%, 50x at 1%. The
+bail-out on incompressible input is 0.99x to 1.00x.
+
+**A sampling pre-check cannot decide this, and the reason generalises.** An earlier
+version sampled 4096 evenly spaced pixels to guess the duplicate share before
+building the table. It reported *zero* duplicates on input that was genuinely 75%
+duplicate, because the input repeated with a period far longer than the sample
+stride and every sample landed on a different value. No sampling scheme catches
+periodic input, so the decision is made from the distinct count alone, with a table
+that never grows. The table size is set by the real photographs, not by taste: at
+2^17 the reduction declined two of the four test images that clearly benefited.
 
 ## Convergence is data-scale dependent, and the packed default now accounts for it
 
@@ -342,6 +352,20 @@ result, and `kmeans` still defaults to `0.0`. Two things to keep in mind:
   values, not percentages of a possibly-tiny reference.
 - **`harness = false` plus `test = true` on a bench makes `cargo test` run the whole
   benchmark in a debug build.** It looks exactly like a hang.
+- **A benchmark's "random" data has to be checked.** Both harnesses generated pixels
+  from the low byte of a 32-bit LCG, whose low bits have a period of 256, so the
+  tables were measuring a 256-colour repeating pattern while labelled random. Nothing
+  looked wrong for years. It surfaced only when the reduction to distinct colours
+  started working and reported a 187x speed-up on "random" input, which is the tell.
+  The generator now takes the top bits of a mixed value and the input really is
+  99.7% distinct. **An implausible result is evidence about the measurement, not
+  about the code.**
+- **A test generator needs the same scrutiny.** The collapse test helper re-randomised
+  colour per pixel while claiming to build flat regions, so nothing repeated and the
+  test asserted the reduction should work on input with no duplicates. A second one
+  built a palette with random triples, which collide by birthday, so an exact
+  assertion on the distinct count was impossible. Both were the measurement being
+  wrong, not the code.
 
 ## Releasing
 

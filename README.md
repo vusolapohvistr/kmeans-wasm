@@ -49,10 +49,16 @@ comes from not paying for it.
 Color Quantization*, [arXiv:1101.0395][celebi], and *Fast Color Quantization Using
 Weighted Sort-Means Clustering*, *JOSA A* 26(11), 2009, [doi][celebi2]. The
 observation that clustering an image's distinct colors with weights, rather than
-every pixel, gives the same result, together with the measured distinct-color
-fractions for the standard test images, 7% to 58%. A prototype of that reduction
-reached 16x to 78x on flat-region input, where pixels repeat heavily, and was
-measured here but not shipped.
+every pixel, gives the same result, and the standard test images there are 7% to
+58% distinct, so the point set shrinks by up to 14x before any clustering happens.
+
+That reduction is what `kmeans_rgb` and `kmeans_rgba` now do, and it is a large
+part of why the real-image table below is much faster than the random-pixel one.
+It is exact rather than approximate: the two forms accumulate the cluster sums in
+different orders, which normally changes the last bits of a centroid, but every
+`u8` value and every partial sum is a small integer, well inside the range where
+`f64` is exact, and integer addition is associative. So the collapsed path returns
+bit-identical centroids, verified from 20 random starting points.
 
 **A plausible reference that turned out to be the wrong one.** Tai Dinh, Wong
 Hauchi, Philippe Fournier-Viger, Daniil Lisik, Minh-Quyet Ha, Hieu-Chi Dam and
@@ -103,6 +109,7 @@ Everything else the module relies on, including bulk memory, reference types, si
 
 - Hamerly k-means algorithm
 - RGB and RGBA color quantization
+- Reduces packed input to its distinct colors, weighted by how often each occurs, so real images cluster a point set up to 14x smaller than the pixel count
 - Arbitrary numeric vector spaces
 - SIMD accelerated inner loop, with no `unsafe` and no runtime feature detection
 - JavaScript and TypeScript bindings
@@ -282,6 +289,14 @@ include that. Results vary by CPU, runtime, initialization, and convergence
 behavior, and the smallest rows are the noisiest because fixed overhead is a
 large share of them.
 
+`skmeans` has no convergence threshold: it runs until no point changes cluster or
+the iteration cap is hit. The only stopping rule both libraries can share is no
+early exit at all, so that is what these tables use, and it is the conservative
+direction — `kmeans_rgb` then does strictly more work than `skmeans`, which stops
+as soon as the assignments settle. The speed-ups are therefore a floor. In normal
+use the packed entry points default to a threshold of `0.1` and are faster still;
+`skmeans` cannot be given the same setting, so it is not measured that way here.
+
 ### Reference RGB results
 
 Median wall times, two warm-ups and eight measured runs per harness run, 100
@@ -290,12 +305,12 @@ columns are recomputed from the median times rather than averaged.
 
 | Test | Pixels | Colors | `kmeans_rgb` | `skmeans` | Speed-up |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| RGB random pixels | 1,000 | 2 | 0.16 ms | 0.37 ms | 2.3× |
-| RGB random pixels | 10,000 | 4 | 0.77 ms | 5.06 ms | 6.6× |
-| RGB random pixels | 10,000 | 16 | 1.87 ms | 9.75 ms | 5.2× |
-| RGB random pixels | 100,000 | 2 | 4.71 ms | 17.69 ms | 3.8× |
-| RGB random pixels | 100,000 | 8 | 11.12 ms | 69.17 ms | 6.2× |
-| RGB random pixels | 100,000 | 32 | 29.54 ms | 148.88 ms | 5.0× |
+| RGB random pixels | 1,000 | 2 | 0.47 ms | 0.41 ms | 0.9× |
+| RGB random pixels | 10,000 | 4 | 6.61 ms | 20.32 ms | 3.1× |
+| RGB random pixels | 10,000 | 16 | 12.84 ms | 59.23 ms | 4.6× |
+| RGB random pixels | 100,000 | 2 | 41.60 ms | 45.62 ms | 1.1× |
+| RGB random pixels | 100,000 | 8 | 103.81 ms | 289.67 ms | 2.8× |
+| RGB random pixels | 100,000 | 32 | 247.03 ms | 1677.87 ms | 6.8× |
 
 ### Reference general vector-space results
 
@@ -303,28 +318,67 @@ Same measurement setup, over points of varying dimension and cluster count.
 
 | Points | Dimensions | Clusters | `kmeans` | `kmeans_rgb` | `skmeans` | Speed-up | Packed speed-up |
 | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 1,000 | 3 | 2 | 0.36 ms | 0.08 ms | 0.48 ms | 1.3× | 4.5× |
-| 10,000 | 3 | 2 | 1.74 ms | 0.53 ms | 2.50 ms | 1.4× | 3.3× |
-| 10,000 | 3 | 10 | 2.62 ms | 1.42 ms | 14.15 ms | 5.4× | 1.8× |
-| 10,000 | 3 | 50 | 5.53 ms | 4.32 ms | 33.75 ms | 6.1× | 1.3× |
-| 100,000 | 3 | 10 | 26.60 ms | 12.58 ms | 149.58 ms | 5.6× | 2.1× |
-| 10,000 | 10 | 10 | 5.33 ms | — | 23.00 ms | 4.3× | — |
-| 10,000 | 50 | 10 | 20.04 ms | — | 64.23 ms | 3.2× | — |
-| 10,000 | 50 | 50 | 25.93 ms | — | 116.08 ms | 4.5× | — |
+| 1,000 | 3 | 2 | 0.62 ms | 0.37 ms | 0.81 ms | 1.3× | 1.7× |
+| 10,000 | 3 | 2 | 5.61 ms | 3.73 ms | 6.04 ms | 1.1× | 1.5× |
+| 10,000 | 3 | 10 | 10.87 ms | 9.22 ms | 61.59 ms | 5.7× | 1.2× |
+| 10,000 | 3 | 50 | 34.78 ms | 29.66 ms | 364.86 ms | 10.5× | 1.2× |
+| 100,000 | 3 | 10 | 126.62 ms | 118.03 ms | 1145.68 ms | 9.0× | 1.1× |
+| 10,000 | 10 | 10 | 25.35 ms | — | 306.38 ms | 12.1× | — |
+| 10,000 | 50 | 10 | 83.15 ms | — | 1456.35 ms | 17.5× | — |
+| 10,000 | 50 | 50 | 263.07 ms | — | 4175.00 ms | 15.9× | — |
 
 `Speed-up` is `skmeans` divided by `kmeans`. `Packed speed-up` is `kmeans` divided by `kmeans_rgb` on the same three-dimensional points, and is shown only where the packed three-component API applies.
 
 The general call has to copy every point across the JavaScript boundary, which is
-a fixed cost per point. It dominates the small rows and shrinks as the cluster
-count grows, which is why `kmeans_rgb` and `kmeans_rgba` are worth reaching for
-whenever the data is three or four values wide.
+a fixed cost per point. That is the whole of the `Packed speed-up` column, and it is
+small on this data: these are random points, so the clustering itself does real work
+and the copy is a tenth of the total. The saving is proportionally much larger when
+the clustering is cheap relative to the data, which is the small-cluster and
+compressible case the real-image table below covers.
 
-One caveat about these tables: the harness generates uniform random pixels, which
-are about 99% distinct. Real images repeat heavily, and the flat regions that
-canvas, PNG, screenshots and icons produce can be under 1% distinct. Anything
-that exploits repetition will look worse here than it is in practice, and
-`kmeans_rgb` does not exploit it at all. See the credits above for the reduction
-that would, and why it is not shipped.
+Note the shape of the speed-up column: it is worst at the smallest cluster counts
+and best at the largest. `skmeans` scans every centroid for every point on every
+round, so it pays `n * k` regardless, while the bounds used here skip most of
+those measurements, and the saving grows with `k`. The two rows where `skmeans`
+is level or marginally ahead are `k=2`, where there is almost nothing to skip.
+
+### Reference real-image results
+
+The two tables above generate uniform random pixels, which are 99.7% distinct.
+Real images are nothing like that: the four below are 6% to 46% distinct. The packed
+entry points reduce the input to its distinct colors before clustering, so the
+random-pixel tables are close to the worst case for them and these are the
+representative ones.
+
+`skmeans` is a JavaScript implementation taking `number[][]`, so it cannot be run
+over a whole photograph in reasonable time. Its column is a fixed 8,000 pixel
+subsample and is **not** comparable to the full-image columns; the other two
+columns are.
+
+| Image | Pixels | Distinct | Colors | `kmeans_rgb` | `kmeans_rgba` | `skmeans` (8k subsample) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| blue-marble | 922,560 | 6.2% | 8 | 57.29 ms | 54.10 ms | 26.96 ms |
+| blue-marble | 922,560 | 6.2% | 16 | 112.61 ms | 107.21 ms | 62.46 ms |
+| blue-marble | 922,560 | 6.2% | 32 | 160.13 ms | 149.31 ms | 68.14 ms |
+| blue-marble | 922,560 | 6.2% | 64 | 269.86 ms | 245.98 ms | 91.19 ms |
+| city | 307,200 | 45.8% | 8 | 149.17 ms | 156.91 ms | 16.36 ms |
+| city | 307,200 | 45.8% | 16 | 216.09 ms | 210.94 ms | 40.19 ms |
+| city | 307,200 | 45.8% | 32 | 336.88 ms | 322.92 ms | 81.59 ms |
+| city | 307,200 | 45.8% | 64 | 634.86 ms | 614.19 ms | 127.56 ms |
+| coast | 307,200 | 30.5% | 8 | 93.31 ms | 92.63 ms | 18.14 ms |
+| coast | 307,200 | 30.5% | 16 | 149.45 ms | 144.17 ms | 47.82 ms |
+| coast | 307,200 | 30.5% | 32 | 259.77 ms | 251.69 ms | 106.42 ms |
+| coast | 307,200 | 30.5% | 64 | 480.97 ms | 441.11 ms | 143.30 ms |
+| harbour | 307,200 | 36.6% | 8 | 104.93 ms | 103.64 ms | 14.05 ms |
+| harbour | 307,200 | 36.6% | 16 | 143.16 ms | 137.16 ms | 27.15 ms |
+| harbour | 307,200 | 36.6% | 32 | 291.68 ms | 274.22 ms | 71.95 ms |
+| harbour | 307,200 | 36.6% | 64 | 506.94 ms | 470.41 ms | 123.64 ms |
+
+Read the `Distinct` column against the timings. `blue-marble` is 6.2% distinct, so
+it reaches the clustering as 57,086 weighted values instead of 922,560 pixels and
+quantizes a megapixel in 160 ms at 32 colours. `city` is 45.8% distinct, so almost
+half its colours are unique and there is much less to collapse: 307,200 pixels take
+337 ms at the same 32 colours, more than twice the time for three times the data.
 
 ## Contributing
 

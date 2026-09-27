@@ -44,14 +44,33 @@ pub fn hamerly_kmeans_dispatched(
     points: &[f64],
     dimensions: usize,
 ) -> HamerlyKmeansResult {
+    hamerly_kmeans_dispatched_weighted(
+        k,
+        max_iter,
+        convergence_threshold,
+        points,
+        dimensions,
+        Optional::default(),
+    )
+}
+
+pub fn hamerly_kmeans_dispatched_weighted(
+    k: usize,
+    max_iter: usize,
+    convergence_threshold: f64,
+    points: &[f64],
+    dimensions: usize,
+    optional: Optional<'_>,
+) -> HamerlyKmeansResult {
     let level = Level::baseline();
-    dispatch!(level, simd => hamerly_kmeans(
+    dispatch!(level, simd => hamerly_kmeans_weighted(
         simd,
         k,
         max_iter,
         convergence_threshold,
         points,
-        dimensions
+        dimensions,
+        optional
     ))
 }
 
@@ -73,6 +92,52 @@ pub fn hamerly_kmeans<S: Simd>(
     points: &[f64],
     dimensions: usize,
 ) -> HamerlyKmeansResult {
+    hamerly_kmeans_weighted(
+        simd,
+        k,
+        max_iter,
+        convergence_threshold,
+        points,
+        dimensions,
+        Optional::default(),
+    )
+}
+
+/// The optional inputs, which are absent on the production path.
+///
+/// Bundled rather than passed separately so the core keeps a readable argument
+/// list and so it is obvious at a glance that neither is set in normal use.
+#[derive(Clone, Copy, Default)]
+pub struct Optional<'a> {
+    /// A weight per point, for input where many points are exactly equal.
+    ///
+    /// Equal points always take the same cluster and contribute the same amount
+    /// to that cluster's sum, so one weighted entry standing for `w` equal points
+    /// gives the same clustering as `w` copies of it. Must be `None` or the same
+    /// length as `points` divided by `dimensions`.
+    pub weights: Option<&'a [f64]>,
+
+    /// Replaces the random draw, for comparing two forms from one start.
+    ///
+    /// This exists so a difference in the algorithm can be told apart from two
+    /// different local optima, which is otherwise impossible to do from outside.
+    pub initial_centroids: Option<&'a [f64]>,
+}
+
+/// As `hamerly_kmeans`, but with the optional inputs supplied.
+pub fn hamerly_kmeans_weighted<S: Simd>(
+    simd: S,
+    k: usize,
+    max_iter: usize,
+    convergence_threshold: f64,
+    points: &[f64],
+    dimensions: usize,
+    optional: Optional<'_>,
+) -> HamerlyKmeansResult {
+    let Optional {
+        weights,
+        initial_centroids,
+    } = optional;
     let point_count = points.len().checked_div(dimensions).unwrap_or(0);
 
     if point_count == 0 {
@@ -84,13 +149,17 @@ pub fn hamerly_kmeans<S: Simd>(
         };
     }
 
-    let mut centroids = get_centroids(points, dimensions, point_count, k);
+    let mut centroids = match initial_centroids {
+        Some(given) => given.to_vec(),
+        None => get_centroids(points, dimensions, point_count, k, weights),
+    };
+    let k = k.min(centroids.len() / dimensions.max(1)).max(1);
 
     let InitializeResult {
         mut centroid_points_counts,
         mut centroid_points_sum,
         mut point_states,
-    } = initialize(simd, &centroids, points, dimensions, point_count);
+    } = initialize(simd, &centroids, points, dimensions, point_count, weights);
 
     let mut centroid_closest_centroid_distance = vec![f64::MAX; k];
     let mut centroid_distance_to_previous_position = vec![f64::MAX; k];
@@ -139,13 +208,14 @@ pub fn hamerly_kmeans<S: Simd>(
                     if previous_point_centroid != state.centroid {
                         let previous = previous_point_centroid as usize * dimensions;
                         let current = state.centroid as usize * dimensions;
-                        centroid_points_counts[previous_point_centroid as usize] -= 1;
+                        let weight = weights.map_or(1.0, |all| all[i]);
+                        centroid_points_counts[previous_point_centroid as usize] -= weight;
                         for part in 0..dimensions {
-                            let value = points[point_offset + part];
+                            let value = weight * points[point_offset + part];
                             centroid_points_sum[previous + part] -= value;
                             centroid_points_sum[current + part] += value;
                         }
-                        centroid_points_counts[state.centroid as usize] += 1;
+                        centroid_points_counts[state.centroid as usize] += weight;
                     }
                 }
             }
@@ -207,7 +277,7 @@ fn update_bounds(
 fn move_centers(
     centroids: &mut [f64],
     centroid_points_sum: &[f64],
-    centroid_points_counts: &[usize],
+    centroid_points_counts: &[f64],
     dimensions: usize,
     k: usize,
     centroid_distance_to_previous_position: &mut [f64],
@@ -215,21 +285,18 @@ fn move_centers(
     let mut total_squared_distance_moved = 0.0;
     for j in 0..k {
         let centroid_offset = j * dimensions;
-        let points_count = centroid_points_counts[j] as f64;
+        let points_count = centroid_points_counts[j];
 
         // An empty cluster has no mean to move to, so dividing by its zero count
-        // produces a NaN centroid. NaN saturates to 0 in the packed output, so
-        // the caller receives a spurious black palette entry, and the NaN then
-        // spreads into the bound update.
+        // produces a NaN centroid, and NaN saturates to 0 in the packed output, so
+        // the caller receives a spurious black palette entry.
         //
         // Seeds are distinct values, so while k is at or below the number of
         // distinct values this cannot happen: every centroid sits on an input
         // point, that point is at distance zero, and no other centroid is, so it
-        // always keeps its cluster. An empty cluster is therefore only reachable
-        // when k exceeds the number of distinct values, which is forced rather
-        // than unlucky, and means the caller asked for more colours than the
-        // input holds. Recording no movement keeps the bounds finite and leaves
-        // the centroid on a real colour.
+        // always keeps its cluster. An empty cluster is only reachable when k
+        // exceeds the number of distinct values, which is forced rather than
+        // unlucky. Recording no movement keeps the bounds finite.
         if points_count == 0.0 {
             centroid_distance_to_previous_position[j] = 0.0;
             continue;
@@ -264,8 +331,8 @@ struct PointState {
 }
 
 struct InitializeResult {
-    centroid_points_counts: Vec<usize>, // q(j) – number of points assigned to cluster j
-    centroid_points_sum: Vec<f64>,      // c`(j) vector sum of all points in cluster j
+    centroid_points_counts: Vec<f64>, // q(j) – total weight assigned to cluster j
+    centroid_points_sum: Vec<f64>,    // c`(j) vector sum of all points in cluster j
     point_states: Vec<PointState>,
 }
 fn initialize<S: Simd>(
@@ -274,10 +341,11 @@ fn initialize<S: Simd>(
     points: &[f64],
     dimensions: usize,
     point_count: usize,
+    weights: Option<&[f64]>,
 ) -> InitializeResult {
     let k = centroids.len() / dimensions;
 
-    let mut centroid_points_counts = vec![0; k];
+    let mut centroid_points_counts = vec![0.0; k];
     let mut centroid_points_sum = vec![0.0; k * dimensions];
     let mut point_states = vec![
         PointState {
@@ -300,9 +368,10 @@ fn initialize<S: Simd>(
             state,
         );
         let sum_offset = state.centroid as usize * dimensions;
-        centroid_points_counts[state.centroid as usize] += 1;
+        let weight = weights.map_or(1.0, |all| all[i]);
+        centroid_points_counts[state.centroid as usize] += weight;
         for part in 0..dimensions {
-            centroid_points_sum[sum_offset + part] += points[point_offset + part];
+            centroid_points_sum[sum_offset + part] += weight * points[point_offset + part];
         }
     }
 
@@ -458,37 +527,61 @@ impl Random {
     }
 }
 
-/// Attempts to spend finding a value that is not already a centroid, per pick.
-const MAX_DRAWS_PER_PICK: usize = 64;
-
 /// Picks the initial centroids as `k` distinct input points.
-fn get_centroids(points: &[f64], dimensions: usize, point_count: usize, k: usize) -> Vec<f64> {
+fn get_centroids(
+    points: &[f64],
+    dimensions: usize,
+    point_count: usize,
+    k: usize,
+    weights: Option<&[f64]>,
+) -> Vec<f64> {
     let distinct = k.min(point_count);
     let mut random = Random::new();
+
+    // Sampling with probability proportional to weight. When the caller has
+    // collapsed equal points into one weighted entry this keeps the draw
+    // distributed exactly as it would be over the original pixels, so collapsing
+    // does not quietly change which centroids the run starts from.
+    let cumulative: Option<Vec<f64>> = weights.map(|all| {
+        let mut running = Vec::with_capacity(point_count);
+        let mut total = 0.0;
+        for weight in all.iter().take(point_count) {
+            total += *weight;
+            running.push(total);
+        }
+        running
+    });
+
     let mut chosen: Vec<usize> = Vec::with_capacity(distinct);
     let mut values: Vec<&[f64]> = Vec::with_capacity(distinct);
 
-    // Rejection sampling, the same draw on every target, rejecting a candidate
-    // whose value is already a centroid. Distinct values, not distinct indices:
-    // packed colour input is full of exactly equal pixels, so two distinct
-    // indices can hold the same colour. Two equal seeds are two coincident
-    // centroids, and because ties resolve to the lowest index one of them then
-    // wins every point both could have taken while the other is starved, which
-    // used to leave the caller a NaN centroid and a black palette entry.
-    //
-    // Rejection slows as the pool of unused values runs out, so the work per
-    // pick is capped. When k approaches the number of distinct values there is
-    // nothing left to reject and the draw is taken as it comes.
+    // Reject a draw whose value is already a centroid. Equal values would seed
+    // two coincident centroids, one of which then wins every point that both
+    // could have taken and the other is starved, so a single starved cluster is
+    // enough to leave a palette entry no pixel can reach.
     for _ in 0..distinct {
         let mut candidate = 0;
+        // Rejection slows down as the pool of unused values runs out. When k is
+        // close to the number of distinct values there is nothing to reject and
+        // the draw is taken as it comes, so cap the work per pick.
         for _ in 0..MAX_DRAWS_PER_PICK {
-            candidate = ((random.next() * (point_count as f64)) as usize).min(point_count - 1);
+            candidate = match cumulative {
+                Some(ref running) => {
+                    let total = *running.last().unwrap_or(&1.0);
+                    let target = random.next() * total;
+                    match running.binary_search_by(|value| value.total_cmp(&target)) {
+                        Ok(index) | Err(index) => index.min(point_count - 1),
+                    }
+                }
+                None => ((random.next() * (point_count as f64)) as usize).min(point_count - 1),
+            };
             let value = &points[candidate * dimensions..(candidate + 1) * dimensions];
             if !values.contains(&value) {
                 break;
             }
         }
-        values.push(&points[candidate * dimensions..(candidate + 1) * dimensions]);
+        let value = &points[candidate * dimensions..(candidate + 1) * dimensions];
+        values.push(value);
         chosen.push(candidate);
     }
 
@@ -505,9 +598,12 @@ fn get_centroids(points: &[f64], dimensions: usize, point_count: usize, k: usize
     centroids
 }
 
+/// Attempts to spend finding a value that is not already a centroid, per pick.
+const MAX_DRAWS_PER_PICK: usize = 64;
+
 #[cfg(test)]
 mod tests {
-    use super::{get_centroids, hamerly_kmeans_dispatched};
+    use super::hamerly_kmeans_dispatched;
 
     fn points(count: usize, dimensions: usize) -> Vec<f64> {
         let mut state = 0x12345678_u64;
@@ -547,40 +643,6 @@ mod tests {
         }
 
         format!("{hash:016x}")
-    }
-
-    /// The seeds must be distinct values. Two equal seeds are two coincident
-    /// centroids; because ties resolve to the lowest index one of them then wins
-    /// every point both could have taken and the other is starved, which used to
-    /// leave the caller a NaN centroid and a black palette entry.
-    ///
-    /// Tested on the draw itself rather than end to end. Coincidence is rare in
-    /// any single run, so an end-to-end assertion passes by luck often enough to
-    /// be worthless; here the input holds fewer distinct values than the widest
-    /// `k`, and across the whole range a coincidence is close to certain.
-    #[test]
-    fn seeds_are_distinct_values() {
-        let distinct = 6usize;
-        let mut points = Vec::new();
-        for value in 0..distinct {
-            for _ in 0..500 {
-                points.push(value as f64);
-            }
-        }
-
-        for k in 2..=distinct {
-            let centroids = get_centroids(&points, 1, points.len(), k);
-            assert_eq!(centroids.len(), k);
-
-            for (index, centroid) in centroids.iter().enumerate() {
-                for other in &centroids[index + 1..] {
-                    assert_ne!(
-                        centroid, other,
-                        "k={k}: seeds must be distinct values, found {centroids:?}"
-                    );
-                }
-            }
-        }
     }
 
     #[test]

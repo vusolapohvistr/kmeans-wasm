@@ -142,3 +142,33 @@ fn rejects_invalid_clustering_arguments() {
         Some("Error: convergence_threshold must be positive")
     );
 }
+
+/// Rejected input. These build a `JsValue`, which aborts on native targets, so
+/// they can only be asserted here.
+#[wasm_bindgen_test]
+fn rejects_malformed_packed_input() {
+    for bad in [vec![], vec![10, 20], vec![10, 20, 30, 40]] {
+        let error = kmeans_rgb(bad.clone(), 2, 100, Some(0.1)).unwrap_err();
+        assert!(
+            String::from_js_value(&error).contains("multiple of 3"),
+            "unexpected message for {bad:?}"
+        );
+    }
+
+    for bad in [vec![1, 2, 3, 4, 5], vec![1, 2, 3]] {
+        let error = kmeans_rgba(bad.clone(), 2, 100, Some(0.1)).unwrap_err();
+        assert!(
+            String::from_js_value(&error).contains("multiple of 4"),
+            "unexpected message for {bad:?}"
+        );
+    }
+}
+
+/// A single pixel is a valid triple, so it is accepted even though it holds one
+/// distinct value and `k` is larger.
+#[wasm_bindgen_test]
+fn accepts_a_single_pixel() {
+    let palette = kmeans_rgb(vec![10, 20, 30], 2, 100, Some(0.1)).unwrap();
+    assert_eq!(palette.len(), 6);
+    assert!(palette.iter().all(|value| matches!(*value, 10 | 20 | 30)));
+}
