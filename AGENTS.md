@@ -43,6 +43,8 @@ tests/web.rs               wasm-only tests (browser)
 tests/quantize.rs          native tests for the packed paths
 tests/histogram.rs         native tests for the reduction
 tests/palette.rs           native tests for the mapping
+tests/collapse_agreement.rs  collapse against a naive count, values and weights
+tests/degenerate.rs         k above the distinct count, and single-colour input
 ```
 
 `docs/wasm/`, `pkg/`, `kmeans-wasm-node/`, `target/` and `node_modules/` are
@@ -127,8 +129,8 @@ There are two places, and they are not the same thing:
   so those two flags were removed; the build still produces a byte-identical
   artifact (md5 `28866c3322ee41328ab582ed7d41e011`, 34,016 bytes at the time)
   without them. The current artifact is larger and is expected to be: the
-  unreleased `apply_palette` took it to 41,270 bytes, md5
-  `5d1628a94991c3910a36fe4489629f8c`, which is 7,254 bytes for a whole new entry
+  unreleased `apply_palette` took it to 41,280 bytes, md5
+  `65d91ee457df421648338480561a85d6`, which is 7,264 bytes for a whole new entry
   point. A caller who never maps pays that in download size, since the wasm
   module is one file and cannot be tree-shaken. The hash is only comparable
   against another build of the same commit, so treat it as a fingerprint rather
@@ -334,6 +336,16 @@ first:
 
 Measured on 480,000 pixels: 4.9x at 25% distinct, 12.7x at 10%, 50x at 1%. The
 bail-out on incompressible input is 0.99x to 1.00x.
+
+**The load limit truncated to zero on a single pixel, and nothing noticed for
+months.** `load_limit` is `slots / 4 * 3`, and a one-pixel buffer rounds to two
+slots, so `2 / 4 * 3` is `0` and the table rejected every distinct value it was
+offered. Harmless to correctness, because the caller falls back to the direct path
+and that path is bit-identical, so no caller ever saw a wrong answer. It was found
+by `tests/collapse_agreement.rs`, which compares `collapse` against a naive count
+over many shapes rather than checking invariants: an invariant test cannot see a
+reduction that declines to happen. The same file also pins the boundary, 196,608
+collapses and 196,609 does not, so an off-by-one there would not be silent.
 
 **A sampling pre-check cannot decide this, and the reason generalises.** An earlier
 version sampled 4096 evenly spaced pixels to guess the duplicate share before

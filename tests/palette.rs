@@ -165,3 +165,94 @@ fn an_empty_buffer_maps_to_an_empty_buffer() {
         Vec::<u8>::new()
     );
 }
+
+/// The search-per-pixel fallback. It runs when the buffer holds more distinct
+/// values than the table can, which the small shapes above never reach, so it was
+/// written by hand and untested. It was once wrong: the fallback built the colour
+/// key little-endian while the table and the unpacking are big-endian, so red and
+/// blue were swapped and every pixel with unequal red and blue was mismapped.
+/// Nothing above would have caught that, because nothing above reaches this path.
+#[test]
+fn the_fallback_path_agrees_when_the_table_cannot_be_built() {
+    // The table holds 2^18 slots and gives up past three quarters of them, so
+    // this needs more than 196,608 distinct values in one buffer.
+    const DISTINCT: usize = 200_000;
+    let components = 3;
+    let k = 8;
+
+    // Every pixel distinct, packed so the whole 24-bit space is not needed but
+    // far more than the table can hold.
+    let mut pixels = Vec::with_capacity(DISTINCT * components);
+    for index in 0..DISTINCT {
+        pixels.push((index % 256) as u8);
+        pixels.push(((index / 256) % 256) as u8);
+        pixels.push(((index / (256 * 256)) % 256) as u8);
+    }
+
+    // Confirm the premise rather than trusting it: this really is the fallback.
+    assert!(
+        kmeans_wasm::packed_histogram::collapse(&pixels, components).is_none(),
+        "the table should decline this input, or this is not testing the fallback"
+    );
+
+    let palette: Vec<u8> = (0..(k * components))
+        .map(|i| (i as u8).wrapping_mul(11))
+        .collect();
+    let got = apply_palette(pixels.clone(), palette.clone(), components).unwrap();
+    assert_eq!(got, reference(&pixels, &palette, components));
+}
+
+/// A single-entry palette, and a palette with duplicate entries so that ties are
+/// forced everywhere rather than by luck.
+#[test]
+fn degenerate_palettes() {
+    let components = 3;
+    let pixels = vec![10u8, 20, 30, 200, 100, 50, 0, 0, 0, 255, 255, 255];
+
+    // One entry: everything becomes it.
+    let single = vec![7u8, 8, 9];
+    assert_eq!(
+        apply_palette(pixels.clone(), single.clone(), components).unwrap(),
+        vec![7, 8, 9, 255, 7, 8, 9, 255, 7, 8, 9, 255, 7, 8, 9, 255]
+    );
+
+    // Duplicate entries: every pixel is exactly equidistant from entries 0 and 1
+    // at best, and the strict comparison has to keep the lower one.
+    let duplicated = vec![10u8, 20, 30, 10, 20, 30, 200, 100, 50];
+    let mapped = apply_palette(pixels.clone(), duplicated.clone(), components).unwrap();
+    assert_eq!(&mapped[0..3], &[10, 20, 30], "a tie keeps the lower entry");
+    assert_eq!(mapped, reference(&pixels, &duplicated, components));
+}
+
+/// Four components, where alpha is carried through rather than synthesised, over
+/// enough distinct values to use the table.
+#[test]
+fn rgba_through_the_table() {
+    let components = 4;
+    let count = 20_000;
+    let mut pixels = Vec::with_capacity(count * components);
+    for index in 0..count {
+        pixels.push((index % 256) as u8);
+        pixels.push(((index * 7) % 256) as u8);
+        pixels.push(((index * 13) % 256) as u8);
+        // Alpha repeats only 8 ways, so the buffer stays compressible while
+        // having many distinct colours overall.
+        pixels.push((index % 8) as u8);
+    }
+    let k = 16;
+    let palette: Vec<u8> = (0..(k * components))
+        .map(|i| (i as u8).wrapping_mul(7))
+        .collect();
+
+    let got = apply_palette(pixels.clone(), palette.clone(), components).unwrap();
+    assert_eq!(got, reference(&pixels, &palette, components));
+    // Every alpha in the output came from the palette, never invented.
+    let (got_rows, _) = got.as_chunks::<4>();
+    let (palette_rows, _) = palette.as_chunks::<4>();
+    for pixel in got_rows {
+        assert!(
+            palette_rows.contains(pixel),
+            "{pixel:?} is not a palette entry"
+        );
+    }
+}

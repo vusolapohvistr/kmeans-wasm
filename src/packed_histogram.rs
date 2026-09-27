@@ -114,7 +114,11 @@ impl Table {
         // Sized for the distinct count that could still be seen, so a buffer that
         // does collapse never probes twice.
         let slots = round_up_to_power_of_two(pixel_count.saturating_mul(2).min(MAX_SLOTS));
-        let load_limit = slots / MAX_LOAD_DENOMINATOR * MAX_LOAD_NUMERATOR;
+        // At least one, because a single-pixel buffer rounds to two slots and
+        // `2 / 4 * 3` is zero, which made the table give up on every
+        // single-pixel input. That is harmless to correctness, since the caller
+        // falls back to the direct path, but it silently skipped the reduction.
+        let load_limit = (slots / MAX_LOAD_DENOMINATOR * MAX_LOAD_NUMERATOR).max(1);
         let shift = 32 - slots.trailing_zeros();
 
         let mut keys = vec![0u32; slots];
