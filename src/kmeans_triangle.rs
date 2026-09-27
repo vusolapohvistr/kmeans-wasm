@@ -218,14 +218,18 @@ fn move_centers(
         let points_count = centroid_points_counts[j] as f64;
 
         // An empty cluster has no mean to move to, so dividing by its zero count
-        // produced a NaN centroid. NaN saturates to 0 in the packed output, so
-        // the caller received a spurious black palette entry, and the NaN then
-        // spread into the bound update. Empty clusters are unavoidable when the
-        // input holds fewer distinct values than k, and for packed colour input
-        // they are ordinary, because two seeds can land on exactly equal pixels
-        // and, ties resolving to the lowest index, one centre then takes every
-        // point. Leave the centroid where it is: that is a real colour, and a
-        // zero movement keeps the bounds finite.
+        // produces a NaN centroid. NaN saturates to 0 in the packed output, so
+        // the caller receives a spurious black palette entry, and the NaN then
+        // spreads into the bound update.
+        //
+        // Seeds are distinct values, so while k is at or below the number of
+        // distinct values this cannot happen: every centroid sits on an input
+        // point, that point is at distance zero, and no other centroid is, so it
+        // always keeps its cluster. An empty cluster is therefore only reachable
+        // when k exceeds the number of distinct values, which is forced rather
+        // than unlucky, and means the caller asked for more colours than the
+        // input holds. Recording no movement keeps the bounds finite and leaves
+        // the centroid on a real colour.
         if points_count == 0.0 {
             centroid_distance_to_previous_position[j] = 0.0;
             continue;
@@ -454,21 +458,42 @@ impl Random {
     }
 }
 
+/// Attempts to spend finding a value that is not already a centroid, per pick.
+const MAX_DRAWS_PER_PICK: usize = 64;
+
 /// Picks the initial centroids as `k` distinct input points.
 fn get_centroids(points: &[f64], dimensions: usize, point_count: usize, k: usize) -> Vec<f64> {
     let distinct = k.min(point_count);
     let mut random = Random::new();
     let mut chosen: Vec<usize> = Vec::with_capacity(distinct);
+    let mut values: Vec<&[f64]> = Vec::with_capacity(distinct);
 
-    // Rejection sampling, the same draw on every target. When k is above the
-    // number of input points there is nothing left to draw, so the remainder
-    // repeats the last pick rather than rejecting forever.
-    while chosen.len() < distinct {
-        let candidate = (random.next() * (point_count as f64)) as usize;
-        if !chosen.contains(&candidate) {
-            chosen.push(candidate);
+    // Rejection sampling, the same draw on every target, rejecting a candidate
+    // whose value is already a centroid. Distinct values, not distinct indices:
+    // packed colour input is full of exactly equal pixels, so two distinct
+    // indices can hold the same colour. Two equal seeds are two coincident
+    // centroids, and because ties resolve to the lowest index one of them then
+    // wins every point both could have taken while the other is starved, which
+    // used to leave the caller a NaN centroid and a black palette entry.
+    //
+    // Rejection slows as the pool of unused values runs out, so the work per
+    // pick is capped. When k approaches the number of distinct values there is
+    // nothing left to reject and the draw is taken as it comes.
+    for _ in 0..distinct {
+        let mut candidate = 0;
+        for _ in 0..MAX_DRAWS_PER_PICK {
+            candidate = ((random.next() * (point_count as f64)) as usize).min(point_count - 1);
+            let value = &points[candidate * dimensions..(candidate + 1) * dimensions];
+            if !values.contains(&value) {
+                break;
+            }
         }
+        values.push(&points[candidate * dimensions..(candidate + 1) * dimensions]);
+        chosen.push(candidate);
     }
+
+    // When k is above the number of input points there is nothing left to draw,
+    // so the remainder repeats the last pick rather than rejecting forever.
     chosen.resize(k, *chosen.last().expect("point_count is not zero"));
 
     let mut centroids = Vec::with_capacity(k * dimensions);
@@ -482,7 +507,7 @@ fn get_centroids(points: &[f64], dimensions: usize, point_count: usize, k: usize
 
 #[cfg(test)]
 mod tests {
-    use super::hamerly_kmeans_dispatched;
+    use super::{get_centroids, hamerly_kmeans_dispatched};
 
     fn points(count: usize, dimensions: usize) -> Vec<f64> {
         let mut state = 0x12345678_u64;
@@ -522,6 +547,40 @@ mod tests {
         }
 
         format!("{hash:016x}")
+    }
+
+    /// The seeds must be distinct values. Two equal seeds are two coincident
+    /// centroids; because ties resolve to the lowest index one of them then wins
+    /// every point both could have taken and the other is starved, which used to
+    /// leave the caller a NaN centroid and a black palette entry.
+    ///
+    /// Tested on the draw itself rather than end to end. Coincidence is rare in
+    /// any single run, so an end-to-end assertion passes by luck often enough to
+    /// be worthless; here the input holds fewer distinct values than the widest
+    /// `k`, and across the whole range a coincidence is close to certain.
+    #[test]
+    fn seeds_are_distinct_values() {
+        let distinct = 6usize;
+        let mut points = Vec::new();
+        for value in 0..distinct {
+            for _ in 0..500 {
+                points.push(value as f64);
+            }
+        }
+
+        for k in 2..=distinct {
+            let centroids = get_centroids(&points, 1, points.len(), k);
+            assert_eq!(centroids.len(), k);
+
+            for (index, centroid) in centroids.iter().enumerate() {
+                for other in &centroids[index + 1..] {
+                    assert_ne!(
+                        centroid, other,
+                        "k={k}: seeds must be distinct values, found {centroids:?}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]

@@ -117,3 +117,136 @@ fn the_default_threshold_stops_flat_input_early() {
         "the default threshold must not change the palette for flat input"
     );
 }
+
+/// Squared distance between two colours, in the same units the core uses.
+fn squared_distance(left: &[u8; 3], right: &[u8; 3]) -> f64 {
+    left.iter()
+        .zip(right.iter())
+        .map(|(a, b)| {
+            let difference = f64::from(*a) - f64::from(*b);
+            difference * difference
+        })
+        .sum()
+}
+
+/// The colour in `palette` that `pixel` maps to.
+fn nearest(palette: &[[u8; 3]], pixel: &[u8; 3]) -> [u8; 3] {
+    palette
+        .iter()
+        .map(|entry| (squared_distance(pixel, entry), *entry))
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+        .expect("palette is not empty")
+        .1
+}
+
+fn colours(bytes: &[u8]) -> Vec<[u8; 3]> {
+    bytes.as_chunks::<3>().0.to_vec()
+}
+
+/// Every palette entry must be reachable: at least one pixel maps to it. A dead
+/// centroid wastes one of the caller's `k` slots and hands back a colour the
+/// quantized image never uses.
+///
+/// The guarantee only holds at or below the number of distinct colours, which is
+/// where this stays. Above it, empty clusters are forced rather than unlucky, and
+/// a forced cluster legitimately has no pixels.
+#[test]
+fn every_palette_entry_is_reachable() {
+    let groups = [
+        [0u8, 0, 0],
+        [255, 255, 255],
+        [255, 0, 0],
+        [0, 255, 0],
+        [0, 0, 255],
+        [255, 255, 0],
+        [0, 255, 255],
+        [255, 0, 255],
+    ];
+    let mut rgb = Vec::new();
+    for (index, colour) in groups.iter().enumerate() {
+        // Unequal multiplicities, so a wrong weight would show.
+        for _ in 0..(200 + index * 37) {
+            rgb.extend_from_slice(colour);
+        }
+    }
+    let input = colours(&rgb);
+
+    for k in 2..=groups.len() {
+        let palette = colours(&kmeans_rgb(rgb.clone(), k, 100, Some(0.1)).unwrap());
+
+        let mut mapped: Vec<[u8; 3]> = input.iter().map(|pixel| nearest(&palette, pixel)).collect();
+        mapped.sort_unstable();
+        mapped.dedup();
+
+        assert_eq!(
+            mapped.len(),
+            palette.len(),
+            "k={k}: palette {palette:?} has entries no pixel maps to"
+        );
+    }
+}
+
+/// With `k` equal to the number of distinct colours, every colour should get its
+/// own centroid and the palette should reproduce the input exactly. This holds
+/// because the seeds are distinct values, so each seed's own colour sits at
+/// distance zero and keeps its cluster. A duplicated seed starves a cluster and
+/// costs one of the `k` slots.
+#[test]
+fn a_palette_the_size_of_the_colour_count_reproduces_the_input() {
+    let groups = [[255u8, 0, 0], [0, 255, 0], [0, 0, 255], [255, 255, 0]];
+    let mut rgb = Vec::new();
+    for (index, colour) in groups.iter().enumerate() {
+        for _ in 0..500 {
+            // An unequal per-group offset, so a wrong weight would show.
+            rgb.extend(colour.iter().map(|value| value.wrapping_add(index as u8)));
+        }
+    }
+    let input = colours(&rgb);
+
+    let palette = colours(&kmeans_rgb(rgb, groups.len(), 100, Some(0.1)).unwrap());
+    assert_eq!(palette.len(), groups.len());
+
+    for pixel in &input {
+        assert_eq!(
+            nearest(&palette, pixel),
+            *pixel,
+            "the palette should reproduce the input exactly"
+        );
+    }
+}
+
+/// With `k` at or below the number of distinct colours, every centroid is seeded
+/// on an input pixel, that pixel is at distance zero from it, and no other
+/// centroid is, so no cluster can empty. The palette must therefore be `k`
+/// distinct colours. This is the property that makes an empty cluster, and the
+/// NaN centroid that follows from one, unreachable.
+#[test]
+fn a_palette_at_or_below_the_colour_count_is_all_distinct_colours() {
+    let groups = [
+        [12u8, 40, 90],
+        [200, 30, 60],
+        [90, 210, 40],
+        [240, 200, 10],
+        [30, 30, 30],
+    ];
+    let mut rgb = Vec::new();
+    for (index, colour) in groups.iter().enumerate() {
+        for _ in 0..300 {
+            rgb.extend(colour.iter().map(|value| value.wrapping_add(index as u8)));
+        }
+    }
+
+    for k in 2..=groups.len() {
+        let mut palette = colours(&kmeans_rgb(rgb.clone(), k, 100, Some(0.1)).unwrap());
+        let total = palette.len();
+        palette.sort_unstable();
+        palette.dedup();
+
+        assert_eq!(
+            palette.len(),
+            total,
+            "k={k} with {} distinct colours: expected {total} distinct colours",
+            groups.len()
+        );
+    }
+}
