@@ -2,6 +2,99 @@
 
 A fast k-means clustering implementation written in Rust and compiled to WebAssembly. It supports color quantization and general vector-space data, with JavaScript and TypeScript bindings.
 
+## Credits
+
+This library would not exist without the researchers whose work it builds on. Every
+algorithmic idea here is someone else's, reimplemented and tuned.
+
+**The clustering core.** The algorithm is Hamerly k-means, from Grant Hamerly and
+Charles Elkan, *Efficient Algorithms for Clustering with Bounds*, *Data Mining and
+Knowledge Discovery* 24(3), 2010, doi `10.1007/s10618-009-0516-5`. Each point keeps
+a lower bound on the distance to its second-closest centroid, and the centroids' own
+movement tightens those bounds by the triangle inequality, so most centroids are
+never measured at all. This is the entire reason the implementation is fast.
+
+The loop it accelerates is Stuart Lloyd's, *Least Squares Quantization in PCM*,
+*IEEE Transactions on Information Theory* 28(2), 1982, [doi][lloyd]: assign every
+point to the nearest centroid, then move each centroid to the mean of its members.
+Hamerly's bounds avoid most of the distance measurements in that loop and nothing
+else. The direct ancestor is Charles Elkan, *Using the Triangle Inequality to
+Accelerate k-Means*, *ICML* 2004, which stores a bound per centroid per point
+instead of one per point.
+
+**Alternatives measured and rejected.** Hamerly's bounds are the cheapest in memory
+of the stored-bounds family, keeping one bound per point where Elkan keeps one per
+centroid per point, and that is what makes them fast rather than fast *and* small.
+Two exact algorithms benchmark ahead of it anyway: Christoph Borgelt's *Even Faster
+Exact k-Means Clustering*, *IDA* 2020, [doi][borgelt], and Aurélien Newling and
+François Fleuret's *Fast k-Means with Accurate Bounds*, *MLG* 2016, in [*PMLR*
+v48][newling], which report roughly 1.3x to 3x over Hamerly. A recent idea worth
+revisiting is Max Pernklau and Nikita Averitchev,
+*Extending k-Means Clustering with Ptolemy's Inequality*, *BTW* 2025, [open
+access][ptolemy]: Ptolemy's inequality gives tighter bounds than the triangle
+inequality, and the gains grow with the cluster count and as dimension falls, which
+is the shape of the packed color workload. None of these were ported, because this
+implementation already spends only about 14% of a full distance scan per round, so
+the extra bound arithmetic they add plausibly costs more than the distances they
+save. The measurements behind that decision are in `AGENTS.md`.
+
+**Seeding.** David Arthur and Sergei Vassilvitskii, *k-means++: the Advantages of
+Careful Seeding*, *SODA* 2007, [PDF][arthur], is the standard better seeding
+scheme. It was implemented and measured here, and rejected: it improved the median
+iteration count on three of four shapes and worsened it on one, all within a few
+percent, while costing about 7% per run. Some of the speedup in the current version
+comes from not paying for it.
+
+**Color quantization.** M. Emre Celebi, *Improving the Performance of K-Means for
+Color Quantization*, [arXiv:1101.0395][celebi], and *Fast Color Quantization Using
+Weighted Sort-Means Clustering*, *JOSA A* 26(11), 2009, [doi][celebi2]. The
+observation that clustering an image's distinct colors with weights, rather than
+every pixel, gives the same result, together with the measured distinct-color
+fractions for the standard test images, 7% to 58%. A prototype of that reduction
+reached 16x to 78x on flat-region input, where pixels repeat heavily, and was
+measured here but not shipped.
+
+**A plausible reference that turned out to be the wrong one.** Tai Dinh, Wong
+Hauchi, Philippe Fournier-Viger, Daniil Lisik, Minh-Quyet Ha, Hieu-Chi Dam and
+Van-Nam Huynh, *Categorical Data Clustering: 25 Years Beyond k-Modes*,
+[arXiv:2408.17244][categorical], accepted at *Expert Systems with Applications*,
+is the obvious reference for a library that
+takes `u8` values. It is the wrong one. Its dissimilarity measures are nominal,
+simple matching above all, which treats a difference of 1 in red and a difference of
+1 in blue as equally far. RGB is discrete but still metric, so Euclidean is correct
+and Hamming would degrade the palette.
+
+**Not used.** Theodore Elfving and Einar Carlsson, *Efficient Algorithms for Gaussian
+Mixture Models in the EM Algorithm*, *SIAM Journal on Matrix Analysis and
+Applications* 17(2), 2005, doi `10.1137/S0895479897328291`, describes the
+conjugate-gradient step that accelerates Lloyd's iteration. It is the most promising
+known way to cut this library's iteration count, and it is not implemented.
+
+[lloyd]: https://doi.org/10.1109/TIT.1982.1056489
+[arthur]: https://theory.stanford.edu/~sergei/papers/kMeansPP-soda.pdf
+[celebi]: https://arxiv.org/abs/1101.0395
+[celebi2]: https://doi.org/10.1364/JOSAA.26.002434
+[borgelt]: https://doi.org/10.1007/978-3-030-44584-3_8
+[newling]: https://proceedings.mlr.press/v48/
+[ptolemy]: https://dl.gi.de/items/e0507a05-fc07-45fb-b5b8-06e50def5007
+[categorical]: https://arxiv.org/abs/2408.17244
+
+## A note on how this was written
+
+From version **3.2.0** onward, most of the work on this library was done by AI
+assistants: the SIMD kernel, the allocation and distance-evaluation work, the
+color quantization entry point, the benchmark harnesses, the playground, the
+regression tests, and the bug fixes. That work is only possible because the
+researchers listed above had already done the hard part, and the results in the
+tables below are reported as carefully as the tools allowed so the claims can be
+checked rather than taken on trust.
+
+The people behind those papers deserve the credit, and the bugs in this library
+are the AI's. Please cite them, not this repository, when describing the
+algorithm.
+
+## Requirements
+
 Version 3 uses WebAssembly SIMD (`simd128`) for performance. Use a runtime with SIMD support, such as Chrome 91+, Firefox 89+, or Safari 16.4+.
 
 Everything else the module relies on, including bulk memory, reference types, sign extension, non-trapping float-to-int conversion and multi-value, has been on by default in every major browser for several years and is assumed rather than negotiated.
@@ -192,16 +285,17 @@ large share of them.
 ### Reference RGB results
 
 Median wall times, two warm-ups and eight measured runs per harness run, 100
-maximum iterations.
+maximum iterations, and the median of five harness runs on top of that. Ratio
+columns are recomputed from the median times rather than averaged.
 
 | Test | Pixels | Colors | `kmeans_rgb` | `skmeans` | Speed-up |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| RGB random pixels | 1,000 | 2 | 0.15 ms | 0.26 ms | 1.7× |
-| RGB random pixels | 10,000 | 4 | 0.73 ms | 3.83 ms | 5.3× |
-| RGB random pixels | 10,000 | 16 | 2.24 ms | 9.34 ms | 3.7× |
-| RGB random pixels | 100,000 | 2 | 4.23 ms | 16.26 ms | 3.6× |
-| RGB random pixels | 100,000 | 8 | 12.66 ms | 66.60 ms | 4.4× |
-| RGB random pixels | 100,000 | 32 | 45.62 ms | 128.36 ms | 2.8× |
+| RGB random pixels | 1,000 | 2 | 0.16 ms | 0.37 ms | 2.3× |
+| RGB random pixels | 10,000 | 4 | 0.77 ms | 5.06 ms | 6.6× |
+| RGB random pixels | 10,000 | 16 | 1.87 ms | 9.75 ms | 5.2× |
+| RGB random pixels | 100,000 | 2 | 4.71 ms | 17.69 ms | 3.8× |
+| RGB random pixels | 100,000 | 8 | 11.12 ms | 69.17 ms | 6.2× |
+| RGB random pixels | 100,000 | 32 | 29.54 ms | 148.88 ms | 5.0× |
 
 ### Reference general vector-space results
 
@@ -209,14 +303,14 @@ Same measurement setup, over points of varying dimension and cluster count.
 
 | Points | Dimensions | Clusters | `kmeans` | `kmeans_rgb` | `skmeans` | Speed-up | Packed speed-up |
 | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 1,000 | 3 | 2 | 0.36 ms | 0.07 ms | 0.39 ms | 1.1× | 5.0× |
-| 10,000 | 3 | 2 | 1.67 ms | 0.43 ms | 2.52 ms | 1.6× | 3.9× |
-| 10,000 | 3 | 10 | 2.69 ms | 1.23 ms | 14.63 ms | 5.6× | 2.2× |
-| 10,000 | 3 | 50 | 7.74 ms | 6.71 ms | 33.65 ms | 4.3× | 1.2× |
-| 100,000 | 3 | 10 | 26.21 ms | 14.49 ms | 131.60 ms | 4.7× | 1.8× |
-| 10,000 | 10 | 10 | 5.67 ms | — | 18.87 ms | 3.5× | — |
-| 10,000 | 50 | 10 | 19.05 ms | — | 62.19 ms | 3.1× | — |
-| 10,000 | 50 | 50 | 29.66 ms | — | 112.22 ms | 3.8× | — |
+| 1,000 | 3 | 2 | 0.36 ms | 0.08 ms | 0.48 ms | 1.3× | 4.5× |
+| 10,000 | 3 | 2 | 1.74 ms | 0.53 ms | 2.50 ms | 1.4× | 3.3× |
+| 10,000 | 3 | 10 | 2.62 ms | 1.42 ms | 14.15 ms | 5.4× | 1.8× |
+| 10,000 | 3 | 50 | 5.53 ms | 4.32 ms | 33.75 ms | 6.1× | 1.3× |
+| 100,000 | 3 | 10 | 26.60 ms | 12.58 ms | 149.58 ms | 5.6× | 2.1× |
+| 10,000 | 10 | 10 | 5.33 ms | — | 23.00 ms | 4.3× | — |
+| 10,000 | 50 | 10 | 20.04 ms | — | 64.23 ms | 3.2× | — |
+| 10,000 | 50 | 50 | 25.93 ms | — | 116.08 ms | 4.5× | — |
 
 `Speed-up` is `skmeans` divided by `kmeans`. `Packed speed-up` is `kmeans` divided by `kmeans_rgb` on the same three-dimensional points, and is shown only where the packed three-component API applies.
 
@@ -224,6 +318,13 @@ The general call has to copy every point across the JavaScript boundary, which i
 a fixed cost per point. It dominates the small rows and shrinks as the cluster
 count grows, which is why `kmeans_rgb` and `kmeans_rgba` are worth reaching for
 whenever the data is three or four values wide.
+
+One caveat about these tables: the harness generates uniform random pixels, which
+are about 99% distinct. Real images repeat heavily, and the flat regions that
+canvas, PNG, screenshots and icons produce can be under 1% distinct. Anything
+that exploits repetition will look worse here than it is in practice, and
+`kmeans_rgb` does not exploit it at all. See the credits above for the reduction
+that would, and why it is not shipped.
 
 ## Contributing
 

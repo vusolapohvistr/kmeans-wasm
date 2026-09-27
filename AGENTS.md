@@ -248,9 +248,6 @@ Roughly in the order they seemed most promising:
 - The `kmeans` JS boundary still copies every point from a JS array into the flat
   buffer. That interop cost is visible in the published table as the gap between
   `kmeans` and `kmeans_rgb`, and it dominates for small inputs.
-- `move_centers` divides by the cluster count, which is zero for an empty cluster
-  and yields a NaN centroid. Empty clusters are possible in principle; the
-  rejection sampler reduces but does not eliminate the chance.
 - The bounds are stored as distances because Hamerly's update is additive in
   distance space, so the square roots cannot be removed without changing the
   algorithm.
@@ -259,6 +256,92 @@ Roughly in the order they seemed most promising:
 - The SIMD kernel only helps once the inner loop is long enough. `kmeans_rgba` at
   four components does one vector op plus a horizontal add per distance, so the
   remaining cost is the per-pair loop overhead rather than the arithmetic.
+
+## What the literature survey settled, and what it did not
+
+A round of reading turned up two results that change what is worth attempting, and
+one that closes off a direction. Recorded so the work is not repeated.
+
+**Hamerly is not the fastest exact algorithm, and that does not matter here.** The
+cover-tree paper (arXiv 2410.15117) benchmarks the whole stored-bounds family and
+finds Hamerly the slowest of them; Borgelt's *Even Faster Exact k-Means*
+(IDA 2020) and Newling and Fleuret's *Fast k-Means with Accurate Bounds* (MLG 2016)
+report 1.4x to 3x over it. Measured here, Hamerly already costs only **14% of a full
+distance scan per round** at d=3 and 21% at d=4. Those papers reduce distance
+*evaluations*, and this crate spent a release making evaluations cheap with SIMD, so
+their extra bound arithmetic plausibly costs more than the distances it saves. Their
+published wins were measured against a slower kernel. Prototype before porting.
+Pernklau and Averitchev's Ptolemy bounds (BTW 2025) are the one to try first if any
+of them is: their gains grow with k and as dimension falls, which is our shape.
+
+**k-means++ is not worth it, and that was measured rather than assumed.** Implemented
+properly, seeded with weights so a collapsed input would draw the same
+distribution. Over five instances per shape it improved median iterations on three
+shapes and worsened one, all within a few percent, while costing about 7% per run.
+A single run had suggested 1.9x, which was one unlucky draw. The same conclusion
+appears in Celebi's initialization comparison, where Forgy lands within a few percent
+of the best scheme after refinement.
+
+**The categorical-clustering literature is the wrong reference.** Dinh et al.'s
+survey (arXiv 2408.17244) is the obvious place to look for a library taking `u8`
+values, and it is a dead end: k-modes and its descendants use nominal dissimilarity
+such as simple matching, which rates a difference of 1 in red and a difference of 1
+in blue as equally far. RGB is discrete but still metric.
+
+**The one large win found, and why it was not shipped.** Celebi's weighted
+sort-means (arXiv 1101.0395) reduces the input to its distinct colours with weights,
+which is exact because equal points are interchangeable. A prototype reached **16x
+to 78x** on flat-region input and 34x to 63x on a smooth gradient, with a bail-out
+that kept incompressible input within 1% to 4% of the uncollapsed path. It was
+dropped rather than shipped, for three reasons worth remembering:
+
+- **The published benchmark data is the worst case for it.** The harness generates
+  uniform random pixels, which are 99.1% distinct, so the tables would have shown a
+  small regression while every real input got much faster. The real photographs in
+  Celebi's set are 7% to 58% distinct.
+- **It changes output on duplicated input** by up to 13% inertia, because the
+  collapsed and full paths cannot share a random seed without an API change. The
+  paper's "identical results" claim assumes the same initial centres. Summation
+  order also differs, so the fingerprint would have to be re-recorded.
+- **The bail-out threshold was not fully understood** when the prototype was
+  dropped. A sample-based pre-check was still declining the collapse on input with
+  50% distinct values, and that was never diagnosed.
+
+If it is ever revisited, the shared-seeding problem is the blocker to solve first.
+
+## Convergence is data-scale dependent, and the packed default now accounts for it
+
+`total_squared_distance_moved` is compared against an absolute threshold, so whether
+that threshold is ever met depends on the scale of the input. With realistic colour
+data it effectively never is: runs exhausted all 100 iterations at every k tested.
+That was partly an artefact of the NaN bug, since a NaN comparison is always false.
+
+The packed entry points now default to `0.1`, below the resolution of the `u8`
+result, and `kmeans` still defaults to `0.0`. Two things to keep in mind:
+
+- **0.1 is small and constant on purpose.** The threshold scales with `k` while the
+  output does not. A `k / 4` threshold was measured stopping *before doing any work*
+  on a flat image and shifting the palette by 254 levels.
+- **Any comparison of two runs must pin the entropy.** The wasm path reads
+  `Math.random`, so an unpinned A/B compares two different initialisations. An early
+  version of the measurement above appeared to show a 40-level palette regression
+  that was entirely two different seeds.
+
+## Measurement traps found the hard way
+
+- **Wall clock on this machine is not trustworthy**, and neither is a single sample
+  of anything. An identical binary has been observed varying by 50% run to run.
+- **A test that passes with the fix reverted is worse than no test.** An
+  end-to-end assertion that the seeds are distinct values passed with the fix
+  removed, because with four colours the collision chance is under one in a thousand
+  and the native RNG is seeded, so it simply got lucky. The property has to be
+  asserted on the draw itself, across a range where a violation is near certain.
+- **Check the mechanism before blaming the change.** A `-100%` inertia figure in the
+  dedup prototype looked like the new path failing; it was the opposite, the
+  collapsed path reaching zero and the full path getting stuck. Print absolute
+  values, not percentages of a possibly-tiny reference.
+- **`harness = false` plus `test = true` on a bench makes `cargo test` run the whole
+  benchmark in a debug build.** It looks exactly like a hang.
 
 ## Releasing
 
