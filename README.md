@@ -307,6 +307,51 @@ this takes 154 ms. `city` is 45.8% distinct, so there is far less to collapse: a
 the pixel count, and the speed-up falls from 84x to 13x. The ratio tracks how
 compressible the image is, which is the whole mechanism.
 
+### Reference mapping results
+
+Clustering gives you the palette; turning that palette back into an image is the
+other half, and it is a per-pixel nearest-colour search. `apply_palette` does it by
+resolving every *distinct* colour to its nearest entry once and then mapping each
+pixel with a single table probe, so the work follows the number of distinct colours
+rather than pixels times entries. Real images repeat heavily, which is what makes
+that pay.
+
+The baseline is the loop this replaces: a per-pixel search over the palette,
+memoised in a `Map` keyed on the packed colour, which is what a caller had to write
+before. Both columns were checked to be **byte-identical on every row**, so these
+are speed-ups on identical output rather than on two things that look similar.
+
+Median of eight measured runs after two warm-ups, one harness run, 100 maximum
+iterations. That is the same per-measurement protocol as the tables above, but a
+single harness run rather than the median of five, so treat these as indicative
+rather than as reference figures.
+
+| Image | Pixels | Distinct | Colors | `apply_palette` | JavaScript loop | Speed-up |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| blue-marble | 922,560 | 6.2% | 8 | 9.75 ms | 19.45 ms | 2.00× |
+| blue-marble | 922,560 | 6.2% | 16 | 8.91 ms | 18.83 ms | 2.11× |
+| blue-marble | 922,560 | 6.2% | 32 | 11.35 ms | 22.12 ms | 1.95× |
+| blue-marble | 922,560 | 6.2% | 64 | 15.63 ms | 26.25 ms | 1.68× |
+| city | 307,200 | 45.8% | 8 | 10.66 ms | 14.19 ms | 1.33× |
+| city | 307,200 | 45.8% | 16 | 13.12 ms | 18.35 ms | 1.40× |
+| city | 307,200 | 45.8% | 32 | 17.30 ms | 23.10 ms | 1.34× |
+| city | 307,200 | 45.8% | 64 | 27.12 ms | 33.13 ms | 1.22× |
+| coast | 307,200 | 30.5% | 8 | 7.49 ms | 11.05 ms | 1.48× |
+| coast | 307,200 | 30.5% | 16 | 9.03 ms | 11.47 ms | 1.27× |
+| coast | 307,200 | 30.5% | 32 | 12.00 ms | 15.53 ms | 1.29× |
+| coast | 307,200 | 30.5% | 64 | 19.16 ms | 22.15 ms | 1.16× |
+| harbour | 307,200 | 36.6% | 8 | 7.98 ms | 9.58 ms | 1.20× |
+| harbour | 307,200 | 36.6% | 16 | 10.43 ms | 11.97 ms | 1.15× |
+| harbour | 307,200 | 36.6% | 32 | 14.01 ms | 16.56 ms | 1.18× |
+| harbour | 307,200 | 36.6% | 64 | 22.52 ms | 25.15 ms | 1.12× |
+
+The trend is the mechanism again: `blue-marble` is 6.2% distinct and gets the most,
+`harbour` at 36.6% gets the least. There is a crossover above roughly half
+distinct, where a per-pixel search becomes competitive again because the table has
+less to compress, and an `apply_palette` call on input that does not repeat at all
+costs 0.83× — the build that was attempted, plus the search it fell back to. That
+bound is small, and the real photographs are nowhere near it.
+
 ## Contributing
 
 Pull requests and issues are welcome. Add tests for new features and bug fixes.

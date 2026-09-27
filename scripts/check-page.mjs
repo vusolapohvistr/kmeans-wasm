@@ -128,6 +128,7 @@ const ids = [
   "rgb-time",
   "rgba-time",
   "skmeans-time",
+  "map-time",
   "source-size",
 ];
 
@@ -260,7 +261,33 @@ for (const id of ["rgb-time", "rgba-time", "skmeans-time"]) {
 const rows = elements
   .get("timing-rows")
   .children.map((row) => row.children.map((cell) => cell.textContent));
-check(rows.length === 3, `expected 3 timing rows, got ${rows.length}`);
+// Four rows: the three clustering implementations plus apply_palette, which is a
+// cost on top of kmeans_rgb rather than a comparison with it.
+check(rows.length === 4, `expected 4 timing rows, got ${rows.length}`);
+check(
+  elements.get("map-time").textContent !== "—",
+  "map-time was never filled in, so the mapping half of quantization was not measured",
+);
+// The baseline row must report 1.00x. It is named rather than positional now, and
+// when it was positional every ratio in the table inverted without failing.
+const baseline = rows.find((row) => row[0] === "kmeans_rgb");
+check(
+  baseline !== undefined && baseline[3] === "1.00×",
+  `kmeans_rgb is the baseline and should read 1.00x, got ${JSON.stringify(baseline)}`,
+);
+for (const row of rows) {
+  if (row[0] === "kmeans_rgb" || row[0] === "apply_palette") continue;
+  check(
+    !row[3].includes("1.00×"),
+    `${row[0]} reports 1.00x against the baseline, which means the baseline is wrong`,
+  );
+}
+
+const mapping = rows.find((row) => row[0] === "apply_palette");
+check(
+  mapping !== undefined && mapping[3].includes("on top"),
+  `the apply_palette row should report a cost rather than a ratio, got ${JSON.stringify(mapping)}`,
+);
 
 if (failures.length > 0) {
   console.error(`\nplayground page check failed:\n${failures.map((f) => `  - ${f}`).join("\n")}`);

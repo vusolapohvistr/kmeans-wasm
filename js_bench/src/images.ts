@@ -1,4 +1,4 @@
-import { kmeans_rgba, kmeans_rgb } from "kmeans-wasm";
+import { apply_palette, kmeans_rgba, kmeans_rgb } from "kmeans-wasm";
 import jpeg from "jpeg-js";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
@@ -57,6 +57,52 @@ interface Row {
   rgbMs: number;
   rgbaMs: number;
   skmeansMs: number;
+  /** `apply_palette`, mapping the palette back onto the image. */
+  mapMs: number;
+  /** The JavaScript loop `apply_palette` replaces, with the same Map cache the playground used. */
+  jsMapMs: number;
+}
+
+/**
+ * The mapping half of quantization, written the way a caller had to before
+ * `apply_palette`: a per-pixel search over the palette, memoised in a Map keyed
+ * on the packed colour. This is the honest baseline, because it is the code the
+ * README used to ask people to write and what `docs/app.js` ran before the entry
+ * point existed.
+ *
+ * Returns RGBA, like `apply_palette`, so the two can be compared byte for byte
+ * rather than only by timing.
+ */
+function jsMapping(pixels: Uint8Array, pixelsCount: number, palette: Uint8Array): Uint8Array {
+  const output = new Uint8Array(pixelsCount * 4);
+  const cache = new Map<number, number>();
+  for (let pixel = 0; pixel < pixelsCount; pixel += 1) {
+    const offset = pixel * 3;
+    const out = pixel * 4;
+    const key = (pixels[offset] << 16) | (pixels[offset + 1] << 8) | pixels[offset + 2];
+    let paletteOffset = cache.get(key);
+    if (paletteOffset === undefined) {
+      let best = 0;
+      let bestDistance = Number.POSITIVE_INFINITY;
+      for (let entry = 0; entry < palette.length; entry += 3) {
+        const dr = pixels[offset] - palette[entry];
+        const dg = pixels[offset + 1] - palette[entry + 1];
+        const db = pixels[offset + 2] - palette[entry + 2];
+        const distance = dr * dr + dg * dg + db * db;
+        if (distance < bestDistance) {
+          bestDistance = distance;
+          best = entry;
+        }
+      }
+      paletteOffset = best;
+      cache.set(key, paletteOffset);
+    }
+    output[out] = palette[paletteOffset];
+    output[out + 1] = palette[paletteOffset + 1];
+    output[out + 2] = palette[paletteOffset + 2];
+    output[out + 3] = 255;
+  }
+  return output;
 }
 
 function median(values: number[]): number {
@@ -131,6 +177,8 @@ console.table(
 const rows: Row[] = [];
 for (const image of images) {
   for (const colors of CLUSTER_COUNTS) {
+    // Kept so the mapping can use the palette the clustering actually produced.
+    const palette = kmeans_rgb(image.rgb, colors, MAX_ITERATIONS, CONVERGENCE_THRESHOLD);
     const rgbMs = measure(() =>
       kmeans_rgb(image.rgb, colors, MAX_ITERATIONS, CONVERGENCE_THRESHOLD),
     );
@@ -142,6 +190,25 @@ for (const image of images) {
       SKMEANS_REPEATS,
       () => skmeans(image.points, colors, RANDOM_SEEDING, MAX_ITERATIONS),
     );
+    // The mapping is measured against the loop it replaces, and the two are
+    // compared byte for byte, so this doubles as a correctness check on every
+    // image and every colour count rather than only a timing.
+    const fromWasm = apply_palette(image.rgb, palette, 3);
+    const fromJavaScript = jsMapping(image.rgb, image.pixels, palette);
+    if (fromWasm.length !== fromJavaScript.length) {
+      throw new Error(`${image.name} at k=${colors}: lengths differ`);
+    }
+    for (let index = 0; index < fromWasm.length; index += 1) {
+      if (fromWasm[index] !== fromJavaScript[index]) {
+        throw new Error(
+          `${image.name} at k=${colors}: apply_palette differs from the JavaScript loop at byte ${index}`,
+        );
+      }
+    }
+
+    const mapMs = measure(() => apply_palette(image.rgb, palette, 3));
+    const jsMapMs = measure(() => jsMapping(image.rgb, image.pixels, palette));
+
     rows.push({
       image: image.name.replace(/\.jpg$/, ""),
       pixels: image.pixels,
@@ -150,6 +217,8 @@ for (const image of images) {
       rgbMs,
       rgbaMs,
       skmeansMs,
+      mapMs,
+      jsMapMs,
     });
   }
 }
@@ -164,6 +233,9 @@ console.table(
     "kmeans_rgb (ms)": Number(row.rgbMs.toFixed(2)),
     "kmeans_rgba (ms)": Number(row.rgbaMs.toFixed(2)),
     "skmeans (ms)": Number(row.skmeansMs.toFixed(2)),
+    "apply_palette (ms)": Number(row.mapMs.toFixed(2)),
+    "js loop (ms)": Number(row.jsMapMs.toFixed(2)),
+    "map speed-up": `${(row.jsMapMs / row.mapMs).toFixed(2)}x`,
   })),
 );
 
@@ -182,4 +254,16 @@ console.log(
 );
 console.log(
   `Every column is a full-image measurement of the same pixels. kmeans-wasm is the median of ${REPEATS} runs after ${WARMUPS} warm-ups; skmeans is the median of ${SKMEANS_REPEATS} after ${SKMEANS_WARMUPS}, because it costs seconds per run on a megapixel.`,
+);
+
+console.log("\nMapping table (apply_palette against the JavaScript loop it replaces)");
+console.log("| Image | Pixels | Distinct | Colors | apply_palette | js loop | Speed-up |");
+console.log("| --- | ---: | ---: | ---: | ---: | ---: | ---: |");
+for (const row of rows) {
+  console.log(
+    `| ${row.image} | ${row.pixels.toLocaleString("en-US")} | ${row.distinctShare.toFixed(1)}% | ${row.colors} | ${row.mapMs.toFixed(2)} ms | ${row.jsMapMs.toFixed(2)} ms | ${(row.jsMapMs / row.mapMs).toFixed(2)}x |`,
+  );
+}
+console.log(
+  "Both columns were checked to be byte-identical on every row, so the speed-up is on identical output rather than on two things that merely look similar.",
 );

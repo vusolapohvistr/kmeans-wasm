@@ -78,12 +78,21 @@
                 <td>—</td>
                 <td>—</td>
               </tr>
+              <tr class="pending">
+                <td><code>apply_palette</code></td>
+                <td>3 × <code>u8</code></td>
+                <td>—</td>
+                <td>—</td>
+              </tr>
             </tbody>
           </table>
           <p class="timing-note" id="timing-note">
-            Clustering only, median of three runs after one warm-up, identical initialization.
+            Clustering, median of three runs after one warm-up, identical initialization.
             <code>kmeans_rgba</code> measures four components per pixel, so it also pays for the
-            alpha channel even though this JPEG is fully opaque.
+            alpha channel even though this JPEG is fully opaque. <code>apply_palette</code> is the
+            other half of quantization: it replaces every pixel with its nearest palette entry, so
+            it is a cost on top of <code>kmeans_rgb</code> rather than a comparison with it, and
+            its last column says how much.
           </p>
         </div>
 
@@ -91,6 +100,7 @@
           <span><strong>Source</strong><span id="source-size">—</span></span>
           <span><strong>Palette</strong> 16 colors</span>
           <span><strong>Iterations</strong> ≤ 30</span>
+          <span><strong>Mapping</strong> <span id="map-time">—</span></span>
           <span><strong>Processing</strong> local browser only</span>
         </div>
       </section>

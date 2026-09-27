@@ -168,25 +168,31 @@ function skmeansPalette(centroids) {
   return palette;
 }
 
-function recordTiming({ method, input, timeId, milliseconds }) {
+function recordTiming({ method, input, timeId, milliseconds, cost, baseline }) {
   document.querySelector(timeId).textContent = formatTime(milliseconds);
-  timings.push({ method, input, milliseconds });
+  timings.push({ method, input, milliseconds, cost, baseline });
   renderTimings();
 }
 
 function renderTimings() {
-  const baseline = timings[0];
+  // Named rather than positional: an earlier version took `timings[0]`, and
+  // adding a row before it inverted every ratio in the table without failing.
+  const reference = timings.find((timing) => timing.baseline) ?? timings[0];
 
   timingRows.replaceChildren(
-    ...timings.map(({ method, input, milliseconds }) => {
+    ...timings.map(({ method, input, milliseconds, cost }) => {
       const row = document.createElement("tr");
-      const ratio = baseline.milliseconds / milliseconds;
+      const ratio = reference.milliseconds / milliseconds;
 
+      // A row that is a cost on top of the baseline rather than a comparison with
+      // it has no meaningful ratio, so it says what it costs instead of showing a
+      // number that would read as a regression.
+      const last = cost ?? formatRatio(ratio);
       for (const [text, className] of [
         [method, "method"],
         [input, "input"],
         [formatTime(milliseconds), "time"],
-        [formatRatio(ratio), "ratio"],
+        [last, "ratio"],
       ]) {
         const cell = document.createElement("td");
         cell.className = className;
@@ -212,12 +218,26 @@ async function initialize() {
 
     setStatus("Clustering with kmeans_rgb…");
     const rgbRun = measure(() => wasm.kmeans_rgb(rgb, PALETTE_SIZE, MAX_ITERATIONS, 0.1));
+
     renderPaletteResult(rgbContext, width, height, rgb, RGB_STRIDE, rgbRun.result);
     recordTiming({
+      baseline: true,
       method: "kmeans_rgb",
       input: "3 × u8",
       timeId: "#rgb-time",
       milliseconds: rgbRun.milliseconds,
+    });
+
+    // The mapping is timed on its own so the page reports the whole pipeline
+    // rather than only the clustering half of it, and it is a cost on top of
+    // kmeans_rgb rather than a comparison with it.
+    const mapRun = measure(() => wasm.apply_palette(rgb, rgbRun.result, RGB_STRIDE));
+    recordTiming({
+      method: "apply_palette",
+      input: "3 × u8",
+      timeId: "#map-time",
+      milliseconds: mapRun.milliseconds,
+      cost: `+${formatTime(mapRun.milliseconds)} on top`,
     });
 
     setStatus("Clustering with kmeans_rgba…");
