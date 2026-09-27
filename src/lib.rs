@@ -43,6 +43,22 @@ fn validate_arguments(
     Ok(())
 }
 
+/// The default convergence threshold for the packed entry points.
+///
+/// The result is a `u8`, so there is nothing to gain from resolving centroids
+/// more finely than a component can represent. A threshold of 0.1 means a round
+/// is only worth running if it moves the centroids by more than a tenth of an
+/// 8-bit level, which is where a colour can still change.
+///
+/// Measured against running to `max_iter`: on flat-region imagery, which is
+/// most canvas, PNG, and UI input, the palette comes back byte-identical after
+/// two rounds instead of a hundred. On inputs where every value is distinct the
+/// palette either matches exactly or moves by one 8-bit level. Anything larger
+/// is unsafe here, because the threshold scales with `k` while the output does
+/// not: a `k / 4` threshold stopped before doing any work on a flat image and
+/// shifted the palette by 254 levels.
+const PACKED_CONVERGENCE_THRESHOLD: f64 = 0.1;
+
 fn quantize_packed_colors(
     slice: Vec<u8>,
     components: usize,
@@ -79,7 +95,9 @@ fn quantize_packed_colors(
 /// - `rgb_slice` - Uint8Array of RGB components, where each component is a u8 value.
 /// - `k >= 2` - number of clusters.
 /// - `max_iter >= 1` - maximum number of iterations.
-/// - `convergence_threshold > 0.0` - the threshold to determine when the centroids have converged.
+/// - `convergence_threshold > 0.0` - the threshold to determine when the centroids have
+///   converged. Defaults to 0.1, which is below the resolution of the `u8` result. Pass 0 to
+///   always run the full `max_iter`.
 ///
 /// This function is suitable for color quantization in image processing, where the goal is to
 /// reduce the number of distinct colors in an image while preserving its overall appearance.
@@ -90,7 +108,7 @@ pub fn kmeans_rgb(
     max_iter: usize,
     convergence_threshold: Option<f64>,
 ) -> Result<Vec<u8>, JsValue> {
-    let convergence_threshold = convergence_threshold.unwrap_or(0.0);
+    let convergence_threshold = convergence_threshold.unwrap_or(PACKED_CONVERGENCE_THRESHOLD);
 
     validate_arguments(
         "rgb_slice",
@@ -116,7 +134,9 @@ pub fn kmeans_rgb(
 /// - `rgba_slice` - Uint8Array of RGBA components, where each component is a u8 value.
 /// - `k >= 2` - number of clusters.
 /// - `max_iter >= 1` - maximum number of iterations.
-/// - `convergence_threshold > 0.0` - the threshold to determine when the centroids have converged.
+/// - `convergence_threshold > 0.0` - the threshold to determine when the centroids have
+///   converged. Defaults to 0.1, which is below the resolution of the `u8` result. Pass 0 to
+///   always run the full `max_iter`.
 ///
 /// This function is the four-component counterpart of `kmeans_rgb`. It is the drop-in choice for
 /// `ImageData.data` and other buffers that interleave red, green, blue, and alpha, so no repacking
@@ -129,7 +149,7 @@ pub fn kmeans_rgba(
     max_iter: usize,
     convergence_threshold: Option<f64>,
 ) -> Result<Vec<u8>, JsValue> {
-    let convergence_threshold = convergence_threshold.unwrap_or(0.0);
+    let convergence_threshold = convergence_threshold.unwrap_or(PACKED_CONVERGENCE_THRESHOLD);
 
     validate_arguments(
         "rgba_slice",

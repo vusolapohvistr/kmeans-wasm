@@ -92,3 +92,28 @@ fn repeated_pixel_values_return_no_spurious_black_entries() {
         "no input pixel is black, so no centroid may be black, got {centroids:?}"
     );
 }
+
+/// The packed default is 0.1, below the resolution of the `u8` result. On
+/// flat-region input the centroids reach a fixpoint almost immediately, so
+/// running to `max_iter` instead wastes rounds without changing a single byte
+/// of the palette.
+#[test]
+fn the_default_threshold_stops_flat_input_early() {
+    let mut rgb = Vec::new();
+    for index in 0..4096 {
+        let band = (index / 512) % 8;
+        rgb.extend_from_slice(&[
+            (band * 32) as u8,
+            (band * 16) as u8,
+            255 - (band * 32) as u8,
+        ]);
+    }
+
+    let early = kmeans_rgb(rgb.clone(), 8, 100, None).unwrap();
+    let full = kmeans_rgb(rgb, 8, 100, Some(0.0)).unwrap();
+
+    assert_eq!(
+        early, full,
+        "the default threshold must not change the palette for flat input"
+    );
+}

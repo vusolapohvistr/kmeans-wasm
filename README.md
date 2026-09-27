@@ -172,9 +172,13 @@ All three entry points throw a `string` on invalid input, so `try`/`catch` and
 - `kmeans_rgb` and `kmeans_rgba` need a length that is a multiple of 3 or 4
 - `kmeans` needs every point to have the same dimension
 
-A `convergenceThreshold` of `0` runs until `maxIter`. Passing a small positive
-value such as `0.1` stops earlier once the centroids stop moving, which is what
-you normally want for interactive work.
+`kmeans_rgb` and `kmeans_rgba` default `convergenceThreshold` to `0.1`,
+which is below the resolution of the `u8` result, so a round is only worth
+running while it can still change a colour. On flat-region imagery the palette
+comes back byte-identical after two rounds instead of the full `maxIter`. Pass
+`0` to always run every iteration. `kmeans` has no such default: it returns
+`f64` centroids, where sub-unit precision is meaningful, so it runs the full
+`maxIter` unless you set `convergenceThreshold` yourself.
 
 ## Benchmarks
 
