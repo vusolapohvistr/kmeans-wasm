@@ -244,18 +244,12 @@ pub fn emeans<S: Simd>(
     }
     let mut transposed = vec![0.0f64; dimensions * k];
     transpose_centroids(&centroids, dimensions, k, &mut transposed);
-    // Counts and sums share one allocation; `apply_batch` borrows the two halves
-    // as separate slices.
-    let mut batch_stats = vec![0.0f64; k + k * dimensions];
-    let (batch_counts, batch_sums) = batch_stats.split_at_mut(k);
+    // Counts and sums for the batch and final pass share one allocation.
+    let mut stats = vec![0.0f64; 2 * k + 2 * k * dimensions];
+    let (batch_counts, rest) = stats.split_at_mut(k);
+    let (batch_sums, rest) = rest.split_at_mut(k * dimensions);
+    let (pass_counts, pass_sums) = rest.split_at_mut(k);
     let mut touched = Vec::with_capacity(k.min(point_count));
-    let mut touched_flags = vec![false; k];
-
-    // Last-epoch-mean finalization: accumulate the assignments made during the
-    // final pass, then replace each non-empty position by that mean. A cluster
-    // that receives nothing keeps its current position rather than becoming NaN.
-    let mut pass_stats = vec![0.0f64; k + k * dimensions];
-    let (pass_counts, pass_sums) = pass_stats.split_at_mut(k);
 
     for epoch in 0..epochs {
         shuffle(&mut chunks, &mut random);
@@ -277,8 +271,9 @@ pub fn emeans<S: Simd>(
                     _ => nearest_centroid(simd, point, &centroids, &transposed, dimensions, k),
                 };
 
-                if !touched_flags[centroid] {
-                    touched_flags[centroid] = true;
+                // Counts are reset after every batch, so zero means this is the
+                // first row assigned to this cluster in the current batch.
+                if batch_counts[centroid] == 0.0 {
                     touched.push(centroid);
                 }
                 batch_counts[centroid] += take;
@@ -324,7 +319,6 @@ pub fn emeans<S: Simd>(
                 batch_counts[centroid] = 0.0;
                 let base = centroid * dimensions;
                 batch_sums[base..base + dimensions].fill(0.0);
-                touched_flags[centroid] = false;
             }
             touched.clear();
 
