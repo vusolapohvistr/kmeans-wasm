@@ -10,9 +10,9 @@ pub(super) fn transpose_centroids(
     k: usize,
     transposed: &mut [f64],
 ) {
-    for cluster in 0..k {
-        for part in 0..dimensions {
-            transposed[part * k + cluster] = centroids[cluster * dimensions + part];
+    for (cluster, row) in centroids.chunks_exact(dimensions).enumerate() {
+        for (part, value) in row.iter().enumerate() {
+            transposed[part * k + cluster] = *value;
         }
     }
 }
@@ -45,9 +45,11 @@ pub(super) fn apply_batch(
         }
         let move_fraction = alpha * count / mass;
         let base = cluster * dimensions;
-        for part in 0..dimensions {
-            let mean = sums[base + part] / count;
-            let position = &mut centroids[base + part];
+        for (sum, position) in sums[base..base + dimensions]
+            .iter()
+            .zip(centroids[base..base + dimensions].iter_mut())
+        {
+            let mean = *sum / count;
             *position += move_fraction * (mean - *position);
         }
         usage[cluster] = mass;
