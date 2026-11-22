@@ -5,11 +5,11 @@ counters = []
 
 [package]
 name = "kmeans-wasm"
-version = "3.7.0"
+version = "3.8.0"
 authors = ["Serhii Pylypchuk <sergiydjan@gmail.com>"]
 edition = "2024"
 rust-version = "1.98"
-description = "A fast k-means clustering implementation using WebAssembly for color quantization and general vector-space clustering."
+description = "A fast k-means and e-means clustering implementation using WebAssembly for color quantization and general vector-space clustering."
 keywords = ["webassembly", "wasm", "k-means", "clustering", "color-quantization"]
 repository = "https://github.com/vusolapohvistr/kmeans-wasm"
 homepage = "https://github.com/vusolapohvistr/kmeans-wasm#readme"

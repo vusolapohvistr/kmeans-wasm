@@ -1,3 +1,4 @@
+pub mod emeans;
 pub mod kmeans_triangle;
 pub mod packed_histogram;
 #[cfg(feature = "counters")]
@@ -41,6 +42,67 @@ fn validate_arguments(
         return Err(JsValue::from_str(&format!(
             "Error: The length of {slice_name} must be a multiple of {components}."
         )));
+    }
+
+    Ok(())
+}
+
+fn validate_emeans_arguments(
+    slice_name: &str,
+    slice_len: usize,
+    components: usize,
+    k: usize,
+    epochs: usize,
+    batch_size: Option<usize>,
+) -> Result<(), JsValue> {
+    if k < 2 {
+        return Err(JsValue::from_str(
+            "Error: k must be greater than or equal to 2.",
+        ));
+    }
+
+    if epochs < 1 {
+        return Err(JsValue::from_str(
+            "Error: epochs must be greater than or equal to 1.",
+        ));
+    }
+
+    if batch_size.is_some_and(|size| size < 1) {
+        return Err(JsValue::from_str(
+            "Error: batch_size must be greater than or equal to 1.",
+        ));
+    }
+
+    if !slice_len.is_multiple_of(components) {
+        return Err(JsValue::from_str(&format!(
+            "Error: The length of {slice_name} must be a multiple of {components}."
+        )));
+    }
+
+    Ok(())
+}
+
+fn validate_emeans_common(
+    k: usize,
+    epochs: usize,
+    batch_size: Option<usize>,
+) -> Result<(), JsValue> {
+    if k < 2 {
+        return Err(JsValue::from_str(
+            "Error: k must be greater than or equal to 2.",
+        ));
+    }
+
+    if epochs < 1 {
+        return Err(JsValue::from_str(
+            "Error: epochs must be greater than or equal to 1.",
+        ));
+    }
+
+    if batch_size.is_some_and(|size| size < 1) {
+        return Err(JsValue::from_str(
+            "Error: batch_size must be greater than or equal to 1.",
+        ));
     }
 
     Ok(())
@@ -123,6 +185,90 @@ fn quantize_packed_colors(
         .iter()
         .map(|value| *value as u8)
         .collect()
+}
+
+fn quantize_packed_colors_emeans(
+    slice: Vec<u8>,
+    components: usize,
+    k: usize,
+    epochs: usize,
+    batch_size: Option<usize>,
+) -> Vec<u8> {
+    // Same reduction as the Lloyd path. For e-means the weight is also the
+    // mechanism that keeps the batch statistics faithful: a distinct colour
+    // contributes its whole pixel count to the batch that contains it.
+    let collapsed = packed_histogram::collapse(&slice, components);
+    let widened;
+    let (points, weights): (&[f64], Option<&[f64]>) = match collapsed.as_ref() {
+        Some(found) => (found.points.as_slice(), Some(found.weights.as_slice())),
+        None => {
+            let mut buffer = Vec::with_capacity(slice.len());
+            for value in slice.iter() {
+                buffer.push(*value as f64);
+            }
+            widened = buffer;
+            (widened.as_slice(), None)
+        }
+    };
+
+    let result = emeans::emeans_dispatched(
+        k,
+        epochs,
+        points,
+        components,
+        emeans::EmeansOptions {
+            weights,
+            batch_size,
+            ..Default::default()
+        },
+    );
+
+    result.centroids.iter().map(|value| *value as u8).collect()
+}
+
+#[wasm_bindgen]
+/// Find the e-means centroids of an RGB u8 slice for color quantization.
+///
+/// e-means is the mini-batch EMA method of Bessa et al., *e-means: outperforming
+/// k-means (in one-tenth the epochs)*, arXiv:2611.09501. It is an alternative to
+/// [`kmeans_rgb`], not a replacement: the Lloyd path is deterministic for a
+/// given draw and the e-means path is a stochastic mini-batch method.
+///
+/// - `rgb_slice` - Uint8Array of RGB components, where each component is a u8 value.
+/// - `k >= 2` - number of clusters.
+/// - `epochs` - passes over the input. Defaults to 5, the reference
+///   implementation's default.
+/// - `batch_size` - points per EMA update. Defaults to the paper's scaling law,
+///   which depends on `k`, the input size, `epochs` and the component count.
+///
+/// The result is a palette of `k` RGB centroids, using last-epoch-mean
+/// finalization. Unlike [`kmeans_rgb`] there is no convergence threshold: the
+/// cosine schedule fixes the number of updates.
+pub fn emeans_rgb(
+    rgb_slice: Vec<u8>,
+    k: usize,
+    epochs: Option<u32>,
+    batch_size: Option<u32>,
+) -> Result<Vec<u8>, JsValue> {
+    let epochs = epochs.map_or(emeans::DEFAULT_EPOCHS, |value| value as usize);
+    let batch_size = batch_size.map(|value| value as usize);
+
+    validate_emeans_arguments(
+        "rgb_slice",
+        rgb_slice.len(),
+        RGB_COMPONENTS,
+        k,
+        epochs,
+        batch_size,
+    )?;
+
+    Ok(quantize_packed_colors_emeans(
+        rgb_slice,
+        RGB_COMPONENTS,
+        k,
+        epochs,
+        batch_size,
+    ))
 }
 
 #[wasm_bindgen]
@@ -290,10 +436,48 @@ pub fn kmeans_rgba(
     ))
 }
 
+#[wasm_bindgen]
+/// Find the e-means centroids of an RGBA u8 slice for color quantization.
+///
+/// This is the four-component counterpart of [`emeans_rgb`], and the e-means
+/// alternative to [`kmeans_rgba`]. The alpha channel is clustered like any other
+/// component.
+///
+/// - `rgba_slice` - Uint8Array of RGBA components, where each component is a u8 value.
+/// - `k >= 2` - number of clusters.
+/// - `epochs` - passes over the input. Defaults to 5.
+/// - `batch_size` - points per EMA update. Defaults to the paper's scaling law.
+pub fn emeans_rgba(
+    rgba_slice: Vec<u8>,
+    k: usize,
+    epochs: Option<u32>,
+    batch_size: Option<u32>,
+) -> Result<Vec<u8>, JsValue> {
+    let epochs = epochs.map_or(emeans::DEFAULT_EPOCHS, |value| value as usize);
+    let batch_size = batch_size.map(|value| value as usize);
+
+    validate_emeans_arguments(
+        "rgba_slice",
+        rgba_slice.len(),
+        RGBA_COMPONENTS,
+        k,
+        epochs,
+        batch_size,
+    )?;
+
+    Ok(quantize_packed_colors_emeans(
+        rgba_slice,
+        RGBA_COMPONENTS,
+        k,
+        epochs,
+        batch_size,
+    ))
+}
+
 #[wasm_bindgen(typescript_custom_section)]
 const KMEANS_TYPE: &'static str = r#"
 export interface IKmeansResult {
-    /** The number of iterations performed until the algorithm has converged */
+    /** The number of iterations performed until convergence, or completed passes for `emeans` */
     it: number;
     /** The cluster size */
     k: number;
@@ -319,6 +503,24 @@ export interface IKmeansResult {
 * @returns {IKmeansResult}
 */
 export function kmeans(data: Array<Array<number>>, k: number, max_iter: number, convergence_threshold?: number): IKmeansResult;
+
+/**
+* Find the e-means centroids for any vector-space.
+*
+* e-means is a mini-batch EMA method from Bessa et al., arXiv:2611.09501. It
+* uses a fixed number of passes instead of a convergence threshold, and its
+* batch size and initial step come from the paper's scaling laws. `it` is the
+* number of completed passes. `idxs` records each point's assignment from the
+* final pass, which is not guaranteed to be the nearest final centroid because
+* the centroids move during that pass; use `test` for a nearest-centroid query.
+*
+* @param {Array<Array<number>>} data
+* @param {number} k
+* @param {number?} epochs
+* @param {number?} batch_size
+* @returns {IKmeansResult}
+*/
+export function emeans(data: Array<Array<number>>, k: number, epochs?: number, batch_size?: number): IKmeansResult;
 "#;
 
 #[wasm_bindgen(skip_typescript)]
@@ -354,6 +556,26 @@ pub fn kmeans(
         ));
     }
 
+    let (points, dimension, _point_count) = flatten_vector_data(&data)?;
+
+    let result = kmeans_triangle::hamerly_kmeans_dispatched(
+        k,
+        max_iter,
+        convergence_threshold,
+        &points,
+        dimension,
+    );
+
+    build_result_object(
+        k,
+        result.iterations,
+        &result.centroids,
+        result.dimensions,
+        &result.assignments(),
+    )
+}
+
+fn flatten_vector_data(data: &Array) -> Result<(Vec<f64>, usize, usize), JsValue> {
     let data_vec: Vec<Vec<f64>> = data
         .iter()
         .map(|point| {
@@ -378,36 +600,38 @@ pub fn kmeans(
     let dimension = data_vec.first().map_or(0, |first_point| first_point.len());
     let point_count = data_vec.len();
 
-    // Flatten into one contiguous buffer for the clustering core. The rows were
-    // only needed to validate the shared dimension.
     let mut points: Vec<f64> = Vec::with_capacity(point_count * dimension);
     for point in &data_vec {
         points.extend_from_slice(point);
     }
 
-    let result = kmeans_triangle::hamerly_kmeans_dispatched(
-        k,
-        max_iter,
-        convergence_threshold,
-        &points,
-        dimension,
-    );
+    Ok((points, dimension, point_count))
+}
 
+/// Builds the JavaScript result shape shared by `kmeans` and `emeans`.
+fn build_result_object(
+    k: usize,
+    iterations: usize,
+    centroids: &[f64],
+    dimensions: usize,
+    assignments: &[u32],
+) -> Result<Object, JsValue> {
     // `Array::new_with_length` would pre-fill the array with holes, so every
     // pushed centroid would land after `k` empty slots.
     let centroids_array = Array::new();
-    for centroid in result.centroid_rows() {
-        let centroid_array = Array::new();
-        for value in centroid {
-            centroid_array.push(&JsValue::from_f64(value));
+    if dimensions > 0 {
+        for centroid in centroids.chunks_exact(dimensions) {
+            let centroid_array = Array::new();
+            for value in centroid {
+                centroid_array.push(&JsValue::from_f64(*value));
+            }
+            centroids_array.push(&centroid_array);
         }
-        centroids_array.push(&centroid_array);
     }
 
-    let assignments = result.assignments();
     let p_c = js_sys::Uint32Array::new_with_length(assignments.len() as u32);
-    for (i, point_index) in assignments.iter().enumerate() {
-        p_c.set_index(i as u32, *point_index);
+    for (index, point_index) in assignments.iter().enumerate() {
+        p_c.set_index(index as u32, *point_index);
     }
 
     let result_js = Object::new();
@@ -419,7 +643,7 @@ pub fn kmeans(
     Reflect::set(
         &result_js,
         &JsValue::from_str("it"),
-        &JsValue::from_f64(result.iterations as f64),
+        &JsValue::from_f64(iterations as f64),
     )?;
     Reflect::set(
         &result_js,
@@ -463,4 +687,53 @@ pub fn kmeans(
     )?;
 
     Ok(result_js)
+}
+
+#[wasm_bindgen(skip_typescript)]
+/// Find the e-means centroids for any vector-space.
+///
+/// e-means is the mini-batch EMA method of Bessa et al., *e-means: outperforming
+/// k-means (in one-tenth the epochs)*, arXiv:2611.09501. It is an alternative to
+/// [`kmeans`] with a fixed pass budget and automatic batch and step sizes.
+///
+/// - `data` - array of arrays of number values, all of the same dimension.
+/// - `k >= 2` - number of clusters.
+/// - `epochs` - passes over the input. Defaults to 5.
+/// - `batch_size` - points per EMA update. Defaults to the paper's scaling law.
+///
+/// The returned `it` is the number of completed passes. `idxs` holds the
+/// assignment from the final pass; the centroids move during that pass, so an
+/// entry is not guaranteed to be the nearest of the returned final centroids.
+/// Use the returned `test` function for a nearest-centroid query.
+pub fn emeans(
+    data: Array,
+    k: usize,
+    epochs: Option<u32>,
+    batch_size: Option<u32>,
+) -> Result<Object, JsValue> {
+    let epochs = epochs.map_or(emeans::DEFAULT_EPOCHS, |value| value as usize);
+    let batch_size = batch_size.map(|value| value as usize);
+    validate_emeans_common(k, epochs, batch_size)?;
+
+    let (points, dimension, _point_count) = flatten_vector_data(&data)?;
+
+    let result = emeans::emeans_dispatched(
+        k,
+        epochs,
+        &points,
+        dimension,
+        emeans::EmeansOptions {
+            batch_size,
+            capture_assignments: true,
+            ..Default::default()
+        },
+    );
+
+    build_result_object(
+        k,
+        result.epochs,
+        &result.centroids,
+        result.dimensions,
+        result.assignments(),
+    )
 }

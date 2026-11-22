@@ -1,6 +1,6 @@
 # kmeans-wasm
 
-A fast k-means clustering implementation written in Rust and compiled to WebAssembly. It supports color quantization and general vector-space data, with JavaScript and TypeScript bindings.
+A fast k-means clustering implementation written in Rust and compiled to WebAssembly. It supports color quantization and general vector-space data, with JavaScript and TypeScript bindings. It ships both the exact Hamerly k-means path and a stochastic e-means path that reaches a comparable palette in a handful of passes.
 
 ## Credits
 
@@ -10,40 +10,42 @@ Discovery* 24(3), 581-606, 2010. It accelerates the iteration Stuart Lloyd
 described in *Least Squares Quantization in PCM*, *IEEE Transactions on
 Information Theory* 28(2), 129-137, 1982, [doi][lloyd].
 
+The e-means entry points follow Bessa, Mazaré, Szilvasy, Touvron, Picard, Douze
+and Jégou, *e-means: outperforming k-means (in one-tenth the epochs)*,
+[arXiv:2611.09501][emeans], and the reference implementation in Faiss
+`contrib/e_means`.
+
 Reducing packed input to its distinct colors before clustering follows M. Emre
 Celebi, *Fast Color Quantization Using Weighted Sort-Means Clustering*, *JOSA A*
 26(11), 2009, [doi][celebi2], and *Improving the Performance of K-Means for Color
 Quantization*, [arXiv:1101.0395][celebi].
 
 [lloyd]: https://doi.org/10.1109/TIT.1982.1056489
+[emeans]: https://arxiv.org/abs/2611.09501
 [celebi]: https://arxiv.org/abs/1101.0395
 [celebi2]: https://doi.org/10.1364/JOSAA.26.002434
 
 ## A note on how this was written
 
 From version **3.2.0** onward, most of the work on this library was done by AI
-assistants: the SIMD kernel, the allocation and distance-evaluation work, the
-color quantization entry point, the benchmark harnesses, the playground, the
-regression tests, and the bug fixes.
-
-That work is only possible because the researchers credited above had already done
-the hard part. Please cite them, not this repository, when describing the
-algorithm. The bugs in this library are the AI's.
+assistants. The algorithms and the hard ideas belong to the researchers credited
+above; the bugs belong to the AI.
 
 ## Requirements
 
-Version 3 uses WebAssembly SIMD (`simd128`) for performance. Use a runtime with SIMD support, such as Chrome 91+, Firefox 89+, or Safari 16.4+.
-
-Everything else the module relies on, including bulk memory, reference types, sign extension, non-trapping float-to-int conversion and multi-value, has been on by default in every major browser for several years and is assumed rather than negotiated.
+Version 3 uses WebAssembly SIMD (`simd128`). Use Chrome 91+, Firefox 89+, or
+Safari 16.4+. Bulk memory, reference types, sign extension, non-trapping
+float-to-int conversion, and multi-value are assumed.
 
 ## Features
 
-- Hamerly k-means algorithm
-- RGB and RGBA color quantization
-- Reduces packed input to its distinct colors, weighted by how often each occurs, so real images cluster a point set up to 14x smaller than the pixel count
-- Maps a palette back onto an image, also keyed on distinct colors rather than pixels
+- Hamerly k-means, bit-for-bit stable for a given random draw
+- e-means mini-batch EMA clustering, with a fixed pass budget instead of a convergence test
+- RGB and RGBA color quantization through either clustering family
+- Distinct-color reduction for packed input, weighted by pixel count
+- Palette mapping keyed on distinct colors rather than pixels
 - Arbitrary numeric vector spaces
-- SIMD accelerated inner loop, with no `unsafe` and no runtime feature detection
+- SIMD inner loop, no `unsafe`, no runtime feature detection
 - JavaScript and TypeScript bindings
 - ES module package with a documented `exports` entry point
 
@@ -57,21 +59,26 @@ The published package targets JavaScript bundlers and exposes an ES module.
 
 ## Usage
 
-Three clustering entry points, all sharing the same clustering core, plus a
-mapping entry point that turns a palette back into an image. Pick the one that
-matches your data layout:
+There are two clustering families. The `kmeans*` entry points run Hamerly
+k-means, whose output is bit-for-bit stable for a given random draw. The
+`emeans*` entry points run the mini-batch EMA method from the e-means paper:
+stochastic, with a fixed pass budget instead of a convergence test. Both accept
+the same input layouts, both return palettes in the same shape, and
+`apply_palette` maps either one back onto an image.
 
 | Export | Input | Use it for |
 | --- | --- | --- |
 | `kmeans_rgb` | `Uint8Array`, 3 values per point | image and palette work |
 | `kmeans_rgba` | `Uint8Array`, 4 values per point | the same, when alpha matters |
 | `kmeans` | `Array<Array<number>>` | any other number of dimensions |
+| `emeans_rgb` | `Uint8Array`, 3 values per point | the same palette with fewer passes |
+| `emeans_rgba` | `Uint8Array`, 4 values per point | the same, when alpha matters |
+| `emeans` | `Array<Array<number>>` | e-means over any other dimension |
 | `apply_palette` | `Uint8Array`, a palette | replacing each pixel with its nearest entry |
 
-The packed entry points take a flat typed array and are several times faster than
-the general one, because nothing has to be copied across the JavaScript boundary
-per point. The general entry point is the only option once you have more or fewer
-than three or four values per point.
+The packed entry points take a flat typed array and avoid copying points one at
+a time across the JavaScript boundary. The general entry points are the only
+option outside three or four values per point.
 
 ### General vector spaces
 
@@ -129,8 +136,8 @@ const rgb = new Uint8Array([
 const quantizedColors = kmeans_rgb(rgb, 3, 1_000, 0.001);
 ```
 
-`kmeans_rgb` returns a `Uint8Array` containing the RGB centroids. The input length
-must be a multiple of three, one value per channel per pixel.
+`kmeans_rgb` returns a `Uint8Array` of RGB centroids. The input length must be a
+multiple of three.
 
 ### RGBA color quantization
 
@@ -146,13 +153,11 @@ const rgba = new Uint8Array([
 const quantizedColors = kmeans_rgba(rgba, 3, 1_000, 0.001);
 ```
 
-`kmeans_rgba` mirrors `kmeans_rgb` for four-component vectors and returns a `Uint8Array` containing the RGBA centroids. It is the drop-in choice for `ImageData.data` and other buffers that interleave red, green, blue, and alpha, because no repacking is needed before clustering. The alpha channel is clustered like any other component, so the function also works for data that mixes transparent and opaque pixels. The input length must be a multiple of four.
+`kmeans_rgba` mirrors `kmeans_rgb` with four components per point and returns
+RGBA centroids. It accepts `ImageData.data` directly, and clusters alpha like any
+other channel. The input length must be a multiple of four.
 
 ### Quantizing an image in the browser
-
-Because `ImageData.data` is already a packed RGBA buffer, the canvas is both the
-input and the output, with no intermediate conversion. `apply_palette` does the
-mapping half, and returns RGBA, which is what `putImageData` takes:
 
 ```js
 import { kmeans_rgba, apply_palette } from "kmeans-wasm";
@@ -167,21 +172,57 @@ output.data.set(apply_palette(image.data, palette, 4));
 context.putImageData(output, 0, 0);
 ```
 
-`apply_palette` works by resolving every distinct color to its nearest palette
-entry once, then mapping each pixel with a single table probe, so the cost is
-proportional to the number of *distinct* colors rather than to pixels times
-entries. On the four photographs in `js_bench/images` that is 1.24x to 2.00x
-faster than searching the palette per pixel in JavaScript, and the result is
-byte-identical. A tie goes to the lower palette index, matching the clustering
-core, so a hand-written search with a strict `<` produces the same bytes.
-
-The same function handles the mapping for either stride: pass `3` with
-`kmeans_rgb` and it writes an opaque alpha for you, since a three-component
-palette has none to carry.
+`apply_palette` resolves each distinct color once and then maps pixels with a
+table probe. A tie goes to the lower palette index, matching the clustering core,
+so a hand-written search with a strict `<` produces the same bytes. Pass `3` with
+`kmeans_rgb` and it writes an opaque alpha.
 
 Run a full working version, including a three-way speed comparison against
 `kmeans_rgb` and `skmeans`, at
 [vusolapohvistr.github.io/kmeans-wasm](https://vusolapohvistr.github.io/kmeans-wasm/).
+
+### e-means: a pass budget instead of a convergence test
+
+`emeans_rgb`, `emeans_rgba`, and `emeans` mirror the three `kmeans*` entry points
+and take two optional numbers: how many passes to make, and how many points per
+EMA update.
+
+```js
+import { emeans_rgba } from "kmeans-wasm";
+
+const palette = emeans_rgba(image.data, 16);          // 5 passes by default
+const quicker = emeans_rgba(image.data, 16, 3);       // fewer passes
+const pinned = emeans_rgba(image.data, 16, 5, 4096);  // explicit batch size
+```
+
+There is no convergence threshold: the cosine schedule fixes the number of
+updates, so `epochs` is the quality/latency dial and `batchSize` only needs
+setting when you are reproducing a run.
+
+`emeans(data, k, epochs?, batchSize?)` returns the same object as `kmeans`, with
+two differences:
+
+- `it` is the number of completed passes, not Lloyd iterations.
+- `idxs` is each point's assignment during the final pass. The centroids move
+  during that pass, so an entry need not be the nearest of the returned final
+  centroids. Use `result.test(point)` for a nearest-centroid query.
+
+e-means is stochastic. The wasm build draws the initial centroids from
+`Math.random` and seeds a local stream from it for the rest of the run, so
+patching `Math.random` before a call makes the run reproducible and gives both
+clustering families the same starting centroids. The packed paths use the same
+distinct-color reduction as `kmeans*`, weighted by pixel count; batches are
+filled by total weight, and large weights are split into chunks so one dominant
+color does not turn a batch into a block of itself.
+
+Clusters below a tenth of the mean mass are revived every five updates by
+splitting a donor cluster, disabled at two dimensions or fewer and when `k`
+exceeds the number of distinct points. Finalization replaces each non-empty
+centroid with its mean over the last pass; an empty cluster keeps its position.
+
+Five passes is the default. The table below uses it. Three passes are faster but
+can lose 10% or more on an individual image; ten passes buy almost nothing over
+five.
 
 ### Arguments and errors
 
@@ -190,42 +231,38 @@ All entry points throw a `string` on invalid input, so `try`/`catch` and
 
 - `k` must be at least 2
 - `maxIter` must be at least 1
+- `epochs` must be at least 1
+- `batchSize` must be at least 1
 - `convergenceThreshold` must not be negative
 - `kmeans_rgb` and `kmeans_rgba` need a length that is a multiple of 3 or 4
-- `kmeans` needs every point to have the same dimension
+- `emeans_rgb` and `emeans_rgba` need the same length multiple
+- `kmeans` and `emeans` need every point to have the same dimension
 - `apply_palette` needs a component count of 3 or 4, a `pixels` length that is a
   multiple of it, and a non-empty `palette` that is also a multiple of it
 
-`kmeans_rgb` and `kmeans_rgba` default `convergenceThreshold` to `0.1`,
-which is below the resolution of the `u8` result, so a round is only worth
-running while it can still change a colour. On flat-region imagery the palette
-comes back byte-identical after two rounds instead of the full `maxIter`. Pass
-`0` to always run every iteration. `kmeans` has no such default: it returns
-`f64` centroids, where sub-unit precision is meaningful, so it runs the full
-`maxIter` unless you set `convergenceThreshold` yourself.
+`kmeans_rgb` and `kmeans_rgba` default `convergenceThreshold` to `0.1`, below
+the resolution of the `u8` result, so a round only runs while it can still change
+a color. Pass `0` to always run every iteration. `kmeans` has no such default
+because `f64` centroids can move by less than one; it runs the full `maxIter`
+unless you set a threshold. The `emeans*` entry points always run the requested
+number of passes.
 
 ## Benchmarks
 
-Both reference tables below come from the release WebAssembly build, measured
-locally on Node.js 26.10.0 over an AMD Ryzen 5 9600X, as the median of five runs
-of the harness. The distance kernel is SIMD accelerated, so these numbers
-include that. Results vary by CPU, runtime, initialization, and convergence
-behavior, and the smallest rows are the noisiest because fixed overhead is a
-large share of them.
+The reference tables come from the release WebAssembly build on Node.js 26.10.0
+over an AMD Ryzen 5 9600X, measured as the median of five harness runs. Each
+harness run is itself a median of eight measured calls after two warm-ups. The
+smallest rows are the noisiest because fixed overhead is a large share.
 
-`skmeans` has no convergence threshold: it runs until no point changes cluster or
-the iteration cap is hit. The only stopping rule both libraries can share is no
-early exit at all, so that is what these tables use, and it is the conservative
-direction — `kmeans_rgb` then does strictly more work than `skmeans`, which stops
-as soon as the assignments settle. The speed-ups are therefore a floor. In normal
-use the packed entry points default to a threshold of `0.1` and are faster still;
-`skmeans` cannot be given the same setting, so it is not measured that way here.
+`skmeans` has no convergence threshold. The RGB and vector tables therefore give
+both libraries no early exit, which is the conservative direction for
+`kmeans_rgb`: in normal use it stops sooner. The real-image table gives
+`skmeans` one measured run after one warm-up because it costs seconds per image;
+every column is a full-image measurement, so the columns are comparable.
 
 ### Reference RGB results
 
-Median wall times, two warm-ups and eight measured runs per harness run, 100
-maximum iterations, and the median of five harness runs on top of that. Ratio
-columns are recomputed from the median times rather than averaged.
+100 maximum iterations.
 
 | Test | Pixels | Colors | `kmeans_rgb` | `skmeans` | Speed-up |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -238,7 +275,7 @@ columns are recomputed from the median times rather than averaged.
 
 ### Reference general vector-space results
 
-Same measurement setup, over points of varying dimension and cluster count.
+Same setup, over points of varying dimension and cluster count.
 
 | Points | Dimensions | Clusters | `kmeans` | `kmeans_rgb` | `skmeans` | Speed-up | Packed speed-up |
 | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -251,34 +288,14 @@ Same measurement setup, over points of varying dimension and cluster count.
 | 10,000 | 50 | 10 | 83.15 ms | — | 1456.35 ms | 17.5× | — |
 | 10,000 | 50 | 50 | 263.07 ms | — | 4175.00 ms | 15.9× | — |
 
-`Speed-up` is `skmeans` divided by `kmeans`. `Packed speed-up` is `kmeans` divided by `kmeans_rgb` on the same three-dimensional points, and is shown only where the packed three-component API applies.
-
-The general call has to copy every point across the JavaScript boundary, which is
-a fixed cost per point. That is the whole of the `Packed speed-up` column, and it is
-small on this data: these are random points, so the clustering itself does real work
-and the copy is a tenth of the total. The saving is proportionally much larger when
-the clustering is cheap relative to the data, which is the small-cluster and
-compressible case the real-image table below covers.
-
-Note the shape of the speed-up column: it is worst at the smallest cluster counts
-and best at the largest. `skmeans` scans every centroid for every point on every
-round, so it pays `n * k` regardless, while the bounds used here skip most of
-those measurements, and the saving grows with `k`. The two rows where `skmeans`
-is level or marginally ahead are `k=2`, where there is almost nothing to skip.
+`Speed-up` is `skmeans` divided by `kmeans`. `Packed speed-up` is `kmeans`
+divided by `kmeans_rgb` on the same three-dimensional points. Random points are
+99.7% distinct, so the packed path saves the boundary copy rather than the
+clustering work.
 
 ### Reference real-image results
 
-The two tables above generate uniform random pixels, which are 99.7% distinct.
-Real images are nothing like that: the four below are 6% to 46% distinct. The packed
-entry points reduce the input to its distinct colors before clustering, so the
-random-pixel tables are close to the worst case for them and these are the
-representative ones.
-
-Every column below is a full-image measurement of the same pixels, so they can be
-compared directly. `skmeans` gets fewer repeats, one measured run after one warm-up
-rather than eight after two, because it costs seconds per run on a megapixel where
-this library costs milliseconds; the sample is seconds long, so the relative noise
-is much lower than the absolute figures suggest.
+Every column is a full-image measurement of the same pixels.
 
 | Image | Pixels | Distinct | Colors | `kmeans_rgb` | `kmeans_rgba` | `skmeans` | Speed-up |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -299,32 +316,38 @@ is much lower than the absolute figures suggest.
 | harbour | 307,200 | 36.6% | 32 | 291.07 ms | 264.26 ms | 4176.57 ms | 14.3× |
 | harbour | 307,200 | 36.6% | 64 | 524.26 ms | 485.55 ms | 7993.00 ms | 15.5× |
 
-Read the `Distinct` column against the timings. `blue-marble` is 6.2% distinct, so
-it reaches the clustering as 57,086 weighted values rather than 922,560 pixels, and
-`skmeans` — which does the full `n * k` scan every round — takes 13 seconds where
-this takes 154 ms. `city` is 45.8% distinct, so there is far less to collapse: at
-32 colours its 307,200 pixels take 337 ms, more than twice as long as three times
-the pixel count, and the speed-up falls from 84x to 13x. The ratio tracks how
-compressible the image is, which is the whole mechanism.
+### Reference e-means results
+
+Lloyd is 100 iterations with no early convergence. e-means is five passes with
+the default batch and step laws. Both sides are seeded from the same stream
+before every call, so their initial centroids match. MSE is the weighted mean
+squared nearest-palette distance over distinct colors, which is also the mean
+over pixels.
+
+| Image | Pixels | Colors | Lloyd MSE | e-means MSE | MSE ratio | `kmeans_rgb` | `emeans_rgb` | Speed-up |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| blue-marble | 922,560 | 8 | 273.75 | 221.30 | 0.808 | 46.28 ms | 12.51 ms | 3.7× |
+| blue-marble | 922,560 | 16 | 104.27 | 95.79 | 0.919 | 94.26 ms | 16.53 ms | 5.7× |
+| blue-marble | 922,560 | 32 | 56.45 | 51.14 | 0.906 | 132.41 ms | 21.54 ms | 6.1× |
+| city | 307,200 | 8 | 958.17 | 958.29 | 1.000 | 136.27 ms | 27.17 ms | 5.0× |
+| city | 307,200 | 16 | 497.30 | 485.70 | 0.977 | 180.20 ms | 36.50 ms | 4.9× |
+| city | 307,200 | 32 | 270.61 | 267.36 | 0.988 | 366.40 ms | 48.57 ms | 7.5× |
+| coast | 307,200 | 8 | 713.37 | 713.27 | 1.000 | 89.77 ms | 17.14 ms | 5.2× |
+| coast | 307,200 | 16 | 349.02 | 348.57 | 0.999 | 138.03 ms | 23.92 ms | 5.8× |
+| coast | 307,200 | 32 | 227.09 | 205.10 | 0.903 | 238.96 ms | 32.27 ms | 7.4× |
+| harbour | 307,200 | 8 | 1063.00 | 1063.04 | 1.000 | 92.11 ms | 22.27 ms | 4.1× |
+| harbour | 307,200 | 16 | 492.41 | 492.69 | 1.001 | 159.65 ms | 30.21 ms | 5.3× |
+| harbour | 307,200 | 32 | 256.70 | 250.10 | 0.974 | 319.73 ms | 39.68 ms | 8.1× |
+
+Three passes run at a median 8.3× with a worst row 13.3% worse than Lloyd; ten
+passes run at 3.1× with no row worse than Lloyd.
 
 ### Reference mapping results
 
-Clustering gives you the palette; turning that palette back into an image is the
-other half, and it is a per-pixel nearest-colour search. `apply_palette` does it by
-resolving every *distinct* colour to its nearest entry once and then mapping each
-pixel with a single table probe, so the work follows the number of distinct colours
-rather than pixels times entries. Real images repeat heavily, which is what makes
-that pay.
+The baseline is a per-pixel search over the palette, memoised by packed color.
+Both columns are byte-identical on every row.
 
-The baseline is the loop this replaces: a per-pixel search over the palette,
-memoised in a `Map` keyed on the packed colour, which is what a caller had to write
-before. Both columns were checked to be **byte-identical on every row**, so these
-are speed-ups on identical output rather than on two things that look similar.
-
-Median of eight measured runs after two warm-ups, one harness run, 100 maximum
-iterations. That is the same per-measurement protocol as the tables above, but a
-single harness run rather than the median of five, so treat these as indicative
-rather than as reference figures.
+Median of eight measured calls after two warm-ups, one harness run.
 
 | Image | Pixels | Distinct | Colors | `apply_palette` | JavaScript loop | Speed-up |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -345,12 +368,9 @@ rather than as reference figures.
 | harbour | 307,200 | 36.6% | 32 | 14.01 ms | 16.56 ms | 1.18× |
 | harbour | 307,200 | 36.6% | 64 | 22.52 ms | 25.15 ms | 1.12× |
 
-The trend is the mechanism again: `blue-marble` is 6.2% distinct and gets the most,
-`harbour` at 36.6% gets the least. There is a crossover above roughly half
-distinct, where a per-pixel search becomes competitive again because the table has
-less to compress, and an `apply_palette` call on input that does not repeat at all
-costs 0.83× — the build that was attempted, plus the search it fell back to. That
-bound is small, and the real photographs are nowhere near it.
+Above roughly half distinct, a per-pixel search becomes competitive again. A
+call on input that does not repeat at all costs about 0.83× because the table
+build is wasted before the fallback search.
 
 ## Contributing
 

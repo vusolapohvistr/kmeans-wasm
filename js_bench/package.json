@@ -23,9 +23,10 @@
     "generate:wasm": "cd .. && wasm-pack build --release --target nodejs --out-dir kmeans-wasm-node && cd js_bench && npm install",
     "bench:rgb": "npm run build && node build/rgb.js",
     "bench:kmeans": "npm run build && node build/vector.js",
-    "start": "npm run build && node build/vector.js && node build/rgb.js && node build/images.js",
+    "start": "npm run build && node build/vector.js && node build/rgb.js && node build/images.js && node build/emeans.js",
     "test": "tsc --noEmit",
-    "bench:images": "npm run build && node build/images.js"
+    "bench:images": "npm run build && node build/images.js",
+    "bench:emeans": "npm run build && node build/emeans.js"
   },
   "dependencies": {
     "jpeg-js": "^0.4.4",

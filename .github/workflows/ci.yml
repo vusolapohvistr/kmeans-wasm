@@ -86,5 +86,8 @@ jobs:
       - name: Run the real-image benchmark harness
         run: npm run bench:images
 
+      - name: Run the e-means benchmark harness
+        run: npm run bench:emeans
+
       - name: Audit JavaScript tooling
         run: npm audit --audit-level=high

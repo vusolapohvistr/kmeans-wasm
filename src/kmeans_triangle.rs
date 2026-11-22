@@ -463,7 +463,7 @@ fn get_min_centroid_skip_point_centroid<S: Simd>(
 }
 
 #[inline(always)]
-fn get_distance_squared<S: Simd>(
+pub(crate) fn get_distance_squared<S: Simd>(
     simd: S,
     point: &[f64],
     centroids: &[f64],
@@ -509,32 +509,32 @@ fn get_distance_squared<S: Simd>(
 /// page seeds it before every measurement. Natively it is a seeded stream so the
 /// test suite and the benchmarks stay repeatable.
 #[cfg(target_arch = "wasm32")]
-struct Random;
+pub(crate) struct Random;
 
 #[cfg(target_arch = "wasm32")]
 impl Random {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Random
     }
 
-    fn next(&mut self) -> f64 {
+    pub(crate) fn next(&mut self) -> f64 {
         js_sys::Math::random()
     }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-struct Random(rand::rngs::SmallRng);
+pub(crate) struct Random(rand::rngs::SmallRng);
 
 #[cfg(not(target_arch = "wasm32"))]
 impl Random {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         use rand::SeedableRng;
 
         // Fixed seed so the native test suite and the benchmarks stay repeatable.
         Random(rand::rngs::SmallRng::seed_from_u64(0))
     }
 
-    fn next(&mut self) -> f64 {
+    pub(crate) fn next(&mut self) -> f64 {
         rand::RngExt::random(&mut self.0)
     }
 }
@@ -547,8 +547,24 @@ fn get_centroids(
     k: usize,
     weights: Option<&[f64]>,
 ) -> Vec<f64> {
-    let distinct = k.min(point_count);
     let mut random = Random::new();
+    get_centroids_with_random(points, dimensions, point_count, k, weights, &mut random)
+}
+
+/// As `get_centroids`, but consumes draws from a caller-owned stream.
+///
+/// e-means needs one stream for both the initial draw and the epoch shuffles.
+/// Hamerly has no other draws, so its wrapper above keeps the old sequence and
+/// the recorded fingerprints are unaffected.
+pub(crate) fn get_centroids_with_random(
+    points: &[f64],
+    dimensions: usize,
+    point_count: usize,
+    k: usize,
+    weights: Option<&[f64]>,
+    random: &mut Random,
+) -> Vec<f64> {
+    let distinct = k.min(point_count);
 
     // Sampling with probability proportional to weight. When the caller has
     // collapsed equal points into one weighted entry this keeps the draw

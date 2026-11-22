@@ -3,7 +3,9 @@
 #![cfg(target_arch = "wasm32")]
 
 use js_sys::{Array, Function, Uint32Array};
-use kmeans_wasm::{apply_palette, kmeans, kmeans_rgb, kmeans_rgba};
+use kmeans_wasm::{
+    apply_palette, emeans, emeans_rgb, emeans_rgba, kmeans, kmeans_rgb, kmeans_rgba,
+};
 use wasm_bindgen::JsValue;
 use wasm_bindgen_test::*;
 
@@ -265,4 +267,139 @@ fn an_empty_buffer_maps_to_an_empty_buffer() {
         apply_palette(Vec::new(), vec![0, 0, 0], 3).unwrap(),
         Vec::<u8>::new()
     );
+}
+
+#[wasm_bindgen_test]
+fn emeans_quantizes_packed_buffers() {
+    let rgb = vec![
+        255, 0, 0, //
+        0, 255, 0, //
+        0, 0, 255, //
+        255, 255, 0, //
+        0, 255, 255, //
+        255, 0, 255,
+    ];
+    let rgba = vec![
+        255, 0, 0, 255, //
+        0, 255, 0, 255, //
+        0, 0, 255, 128, //
+        255, 255, 255, 0,
+    ];
+
+    assert_eq!(emeans_rgb(rgb, 3, Some(5), None).unwrap().len(), 9);
+    assert_eq!(emeans_rgba(rgba, 4, Some(5), Some(2)).unwrap().len(), 16);
+    // Defaults are part of the API: two optional arguments are enough.
+    assert_eq!(emeans_rgb(vec![0; 3 * 64], 2, None, None).unwrap().len(), 6);
+}
+
+/// e-means replaces the convergence threshold with a fixed pass budget, so these
+/// are the only arguments it can reject. Building a `JsValue` aborts natively,
+/// which is why they are asserted here.
+#[wasm_bindgen_test]
+fn rejects_invalid_emeans_arguments() {
+    assert_eq!(
+        emeans_rgb(vec![0; 6], 1, Some(5), None)
+            .unwrap_err()
+            .as_string()
+            .as_deref(),
+        Some("Error: k must be greater than or equal to 2.")
+    );
+    assert_eq!(
+        emeans_rgb(vec![0; 6], 2, Some(0), None)
+            .unwrap_err()
+            .as_string()
+            .as_deref(),
+        Some("Error: epochs must be greater than or equal to 1.")
+    );
+    assert_eq!(
+        emeans_rgba(vec![0; 8], 2, Some(5), Some(0))
+            .unwrap_err()
+            .as_string()
+            .as_deref(),
+        Some("Error: batch_size must be greater than or equal to 1.")
+    );
+    assert_eq!(
+        emeans_rgb(vec![0; 4], 2, Some(5), None)
+            .unwrap_err()
+            .as_string()
+            .as_deref(),
+        Some("Error: The length of rgb_slice must be a multiple of 3.")
+    );
+    assert_eq!(
+        emeans_rgba(vec![0; 6], 2, Some(5), None)
+            .unwrap_err()
+            .as_string()
+            .as_deref(),
+        Some("Error: The length of rgba_slice must be a multiple of 4.")
+    );
+
+    let ragged = to_js_point_array(&[&[1.0, 2.0, 3.0], &[4.0, 5.0]]);
+    assert_eq!(
+        emeans(ragged, 2, Some(5), None)
+            .unwrap_err()
+            .as_string()
+            .as_deref(),
+        Some("Error: All data points must have the same dimension.")
+    );
+    assert_eq!(
+        emeans(to_js_point_array(&[&[1.0], &[2.0]]), 1, Some(5), None)
+            .unwrap_err()
+            .as_string()
+            .as_deref(),
+        Some("Error: k must be greater than or equal to 2.")
+    );
+    assert_eq!(
+        emeans(to_js_point_array(&[&[1.0], &[2.0]]), 2, Some(0), None)
+            .unwrap_err()
+            .as_string()
+            .as_deref(),
+        Some("Error: epochs must be greater than or equal to 1.")
+    );
+    assert_eq!(
+        emeans(to_js_point_array(&[&[1.0], &[2.0]]), 2, Some(5), Some(0))
+            .unwrap_err()
+            .as_string()
+            .as_deref(),
+        Some("Error: batch_size must be greater than or equal to 1.")
+    );
+}
+
+/// The general result has the same dense shape as `kmeans`, but `it` counts
+/// passes rather than iterations and `idxs` is the final pass's assignment.
+#[wasm_bindgen_test]
+fn emeans_returns_a_dense_vector_result() {
+    let data = to_js_point_array(&[
+        &[0.0, 0.0],   //
+        &[0.0, 1.0],   //
+        &[10.0, 10.0], //
+        &[10.0, 11.0],
+    ]);
+
+    let result = emeans(data, 2, Some(3), Some(2)).unwrap();
+
+    assert_eq!(property(&result, "k").as_f64(), Some(2.0));
+    assert_eq!(property(&result, "it").as_f64(), Some(3.0));
+
+    let centroids: Array = property(&result, "centroids").into();
+    assert_eq!(centroids.length(), 2);
+    for index in 0..centroids.length() {
+        let centroid: Array = centroids.get(index).into();
+        assert_eq!(centroid.length(), 2);
+        assert!(
+            centroid.iter().all(|value| value.as_f64().is_some()),
+            "centroid {index} should be dense"
+        );
+    }
+
+    let idxs: Uint32Array = property(&result, "idxs").into();
+    assert_eq!(idxs.length(), 4);
+    for index in 0..idxs.length() {
+        assert!(idxs.get_index(index) < 2);
+    }
+
+    let test: Function = property(&result, "test").into();
+    assert!(test.call1(&result, &to_js_array(&[0.5, 0.5])).is_ok());
+
+    let defaulted = emeans(to_js_point_array(&[&[0.0], &[10.0]]), 2, None, None).unwrap();
+    assert_eq!(property(&defaulted, "it").as_f64(), Some(5.0));
 }

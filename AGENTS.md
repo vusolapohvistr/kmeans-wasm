@@ -5,25 +5,31 @@ changing anything; it records the things that are expensive to rediscover.
 
 ## What the project is
 
-A Hamerly k-means implementation in Rust compiled to WebAssembly, published to
-npm as `kmeans-wasm`. Three public entry points:
+A Hamerly k-means and e-means implementation in Rust compiled to WebAssembly,
+published to npm as `kmeans-wasm`. Six public clustering entry points and one
+mapping entry point:
 
 | Export | Input | Returns | Notes |
 | --- | --- | --- | --- |
 | `kmeans_rgb` | `Uint8Array`, 3 components per point | `Uint8Array` of centroids | packed color path |
 | `kmeans_rgba` | `Uint8Array`, 4 components per point | `Uint8Array` of centroids | clusters alpha too |
 | `kmeans` | `Array<Array<number>>` | object with `k`, `it`, `centroids`, `idxs`, `test` | arbitrary dimensions |
+| `emeans_rgb` | `Uint8Array`, 3 components per point | `Uint8Array` of centroids | stochastic, fixed pass budget |
+| `emeans_rgba` | `Uint8Array`, 4 components per point | `Uint8Array` of centroids | stochastic, clusters alpha |
+| `emeans` | `Array<Array<number>>` | object with `k`, `it`, `centroids`, `idxs`, `test` | arbitrary dimensions |
 | `apply_palette` | `Uint8Array`, a palette | `Uint8Array` of RGBA pixels | maps a palette onto an image |
 
-`kmeans` returns a JS object, so it is only usable from JavaScript. The `js_sys`
-calls abort the process on native targets, which is why the general API has no
-native test coverage and its benchmark harness is a Node script.
+`kmeans` and `emeans` return a JS object, so they are only usable from
+JavaScript. The `js_sys` calls abort the process on native targets, which is why
+the general APIs have no native test coverage and their benchmark harnesses are
+Node scripts.
 
 ## Layout
 
 ```
 src/lib.rs                 public API, argument validation, input conversion
 src/kmeans_triangle.rs     the clustering core: hamerly_kmeans and helpers
+src/emeans.rs              e-means core: mini-batch EMA, scaling laws, revival
 src/packed_histogram.rs    collapse to distinct colours, and the palette map
 benches/kmeans_rgb.rs      native Criterion bench, packed 3-component
 benches/kmeans_rgba.rs     native Criterion bench, packed 4-component
@@ -33,6 +39,7 @@ benches/work_split.rs     how much of a round is distances and how much is bound
 js_bench/src/rgb.ts        Node harness: kmeans_rgb vs skmeans
 js_bench/src/vector.ts     Node harness: kmeans vs skmeans vs kmeans_rgb
 js_bench/src/images.ts     Node harness: the four test photographs
+js_bench/src/emeans.ts     Node harness: e-means vs Lloyd on the photographs
 docs/                      GitHub Pages playground (index.html, app.js, styles.css)
 scripts/                   npm package finalizer, npm staging helper
 scripts/check-page.mjs     runs docs/app.js headless and checks what it painted
@@ -45,6 +52,7 @@ tests/histogram.rs         native tests for the reduction
 tests/palette.rs           native tests for the mapping
 tests/collapse_agreement.rs  collapse against a naive count, values and weights
 tests/degenerate.rs         k above the distinct count, and single-colour input
+tests/emeans.rs            native tests for the e-means core and packed paths
 ```
 
 `docs/wasm/`, `pkg/`, `kmeans-wasm-node/`, `target/` and `node_modules/` are
@@ -62,6 +70,7 @@ npm run build          # wasm-pack -> pkg/ + finalize-npm-package.mjs
 npm run pages:build    # wasm-pack --target web -> docs/wasm/
 npm run bench:rgb      # rebuilds the node target, then runs js_bench/src/rgb.ts
 npm run bench:kmeans   # same for the general API harness
+npm run bench:emeans   # e-means against Lloyd on the four photographs
 npm run test:page      # runs docs/app.js headless and checks what it painted
 npm run release:dry    # release-it dry run
 ```
@@ -435,6 +444,146 @@ result, and `kmeans` still defaults to `0.0`. Two things to keep in mind:
   version of the measurement above appeared to show a 40-level palette regression
   that was entirely two different seeds.
 
+## e-means is a second solver, not a replacement
+
+`src/emeans.rs` implements the mini-batch EMA method of Bessa, Mazaré, Szilvasy,
+Touvron, Picard, Douze and Jégou, *e-means: outperforming k-means (in one-tenth
+the epochs)*, arXiv:2611.09501, following the reference implementation in Faiss
+`contrib/e_means`. The public entry points are `emeans_rgb`, `emeans_rgba` and
+`emeans`, with signatures that mirror the three `kmeans*` ones. The Hamerly path is
+untouched and its fingerprints still pass; keep the two solvers in separate
+modules so neither can quietly change the other's arithmetic.
+
+The state is a mass `N_j` and a position `c_j` per cluster. A batch contributes a
+count `n_j` and a sum `s_j`, and one update is
+`N_j <- gamma N_j + (1 - gamma) n_j`,
+`c_j <- c_j + alpha n_j / N_j (s_j / n_j - c_j)`, with `alpha = 1 - gamma`
+cosine-annealed from `alpha0` to `alpha0 / 10`. The first update uses `alpha0`
+itself. The initial mass is the paper's `1e-10`, not the reference
+implementation's `2^-16`; either is negligible against a batch, and this matches
+the paper.
+
+The exact shipped fits are in the module. Two things about them are easy to get
+wrong:
+
+- **`n` is total weight, not row count.** The packed paths collapse equal colours,
+  so `n` is the pixel count even when the core sees 57,086 rows. The batch and
+  step laws are statistical and must use the pixels the rows stand for; using the
+  distinct count makes the batch far too small on a compressible image.
+- **A caller-given batch size is also in points, not rows.** It is clamped to the
+  total weight, not to the number of distinct rows, because a weighted row can be
+  split across batches. `resolve_batch_size(1_000.0, ..., Some(800))` returns 800
+  even if there are four rows.
+
+Batch filling, chunking and finalization are the parts that are not obvious from
+the paper:
+
+- **Batches are filled by total weight.** Small weights, which are almost every
+  colour in a photograph, contribute once and are then shuffled with everything
+  else.
+- **Large weights are split into chunks of `batch_size / 16`, and the chunks are
+  shuffled.** Emitting a colour that occurs 800,000 times as one weight would
+  make one batch almost entirely that colour and leave the rest empty, which is
+  not a shuffle of the pixels it represents. Splitting into smaller pieces lets
+  the dominant colour participate throughout the epoch. The trade is that one
+  distinct row can be assigned to different centroids in different chunks; the
+  packed paths do not expose assignments, so only the general unweighted path has
+  exact per-row labels, and there every row is one chunk.
+- **Finalization is the last-epoch mean.** Sums and counts are accumulated during
+  the final pass, then every non-empty position is replaced by `s_j / n_j`. No
+  new assignment is made. A cluster that receives nothing keeps its current
+  position rather than becoming NaN, which matters after a revival split.
+- **Revival happens every five updates.** Clusters below `0.1 * mean(N)` are
+  split off a donor chosen without replacement in proportion to its mass. The
+  donor and child are perturbed by `±1e-4` with alternating signs, and each keeps
+  half the donor's mass. Revival is disabled at two dimensions or fewer, matching
+  the reference implementation's held-out result, and also when `k` exceeds the
+  number of distinct rows.
+- **There are no Hamerly bounds.** Centroids move every batch, so the stored-bound
+  argument does not transfer. An epoch costs one full `n * k` scan, and e-means
+  wins by needing far fewer passes plus the distinct-colour reduction. Do not
+  describe it as bounded k-means.
+
+The public `it` and `idxs` mean something different from `kmeans`: `it` is
+completed passes and `idxs` is the final pass's assignment, which can differ from
+the nearest returned centroid because the centroids keep moving during that pass.
+`result.test` is the nearest-centroid query. This is documented in the TypeScript
+declarations and asserted in `tests/web.rs`.
+
+`js_bench/src/emeans.ts` is the comparison that matters. Both sides are seeded
+from the same mulberry32 stream before every call, so their initial centroids are
+identical; Lloyd runs 100 iterations with no threshold, e-means runs its default
+five passes. On the four photographs at k=8,16,32, five passes match or improve
+Lloyd's MSE on nine of twelve rows, the other three are within 0.1%, and the
+median speed-up is 5.5x with a range of 3.7x to 8.1x. Three passes are 8.3x at the
+median but lose up to 13.3% on a row; ten passes are 3.1x and do not beat five
+consistently. That is the evidence for the five-pass default. The harness fails
+if five passes ever come out more than 2% worse than Lloyd on a row, which is a
+quality regression gate rather than a timing claim.
+
+### What made the e-means path faster
+
+- **Use one local entropy stream after the initial draw.** A shuffle used to call
+  `js_sys::Math::random` once per item, which on blue-marble at k=32 was 577,941
+  JavaScript calls per run. The initial centroids still come from `Random`, so a
+  patched `Math.random` keeps the Lloyd and e-means starting points identical;
+  after that, two draws seed a SplitMix64 stream and every shuffle uses it. The
+  same run now makes 34 calls, and the end-to-end e-means time fell by 1.2x to
+  1.5x depending on `k`, with no change to reproducibility.
+- **Put the two SIMD lanes on two clusters, not two dimensions.** The assignment
+  phase scans the same small centroid set for a long stream of independently
+  weighted rows, so a dimension-major `transposed` copy makes two cluster
+  positions contiguous. That removes the horizontal add from every distance and
+  halves the scan bookkeeping; the packed 3- and 4-component paths get a
+  const-generic version so the dimension loop is unrolled. Against the
+  pre-optimization build on blue-marble (k=8,16,32), the combined change is
+  1.69x, 1.58x and 1.64x. The paired scan is bit-identical to the old scan for
+  d<=3 and may differ for d>=4 through reassociation; e-means has no bit
+  invariant, so that is allowed. A unit test compares both scans against a
+  plain integer linear scan, including the odd-cluster tail.
+- **The row-order shuffle was redundant.** Chunks were built in shuffled row
+  order and then shuffled again. A uniform shuffle of the chunk list erases the
+  first order, so the row shuffle and the per-epoch rebuild were removed; the
+  chunk multiset is built once and reshuffled per epoch.
+- **The chunk divisor is not worth tuning.** 8, 16 and 32 chunks per batch were
+  compared over nine seeds on all four photographs. The MSE differences were
+  mostly below 0.1%, one row was 2.3% worse at 8, and timing moved in both
+  directions beyond noise. 16 stays.
+
+`tests/emeans.rs` covers the packed paths and the core: separated groups, a flat
+image, empty input, repeated native runs, and an exact one-batch check that
+weighted rows produce the same centroids as the expanded pixels. The general
+`emeans` API builds a `JsValue`, so its invalid-argument and result-shape tests
+live in `tests/web.rs`; a native test cannot call it.
+
+## The e-means artifact size is mostly the e-means core, not the math
+
+The original e-means build left `pkg/kmeans_wasm_bg.wasm` at 75,682 bytes, md5
+`4cb2fe5363003be22764d4136c520443`. Two changes after that measurement made the
+same source much smaller:
+
+- **Inverse-CDF revival.** `revive_unused` no longer computes
+  `ln(uniform) / mass`, sorts donor keys, or materialises a key per cluster.
+  It now picks donors with the same weighted-without-replacement distribution
+  by inverse CDF over the remaining donor mass, blocking each chosen donor
+  before the next draw. This also avoids a per-revival allocation.
+- **Bit-level power-of-two rounding.** `round_to_power_of_two` clears the
+  mantissa of the raw batch size instead of calling `log2` and `powf`, so the
+  batch-size paths that call it no longer pull in the log path for that use.
+
+With those changes the artifact is 62,761 bytes, md5
+`4ac07ac87e668b7b4f3342a4b647108f`, the same as `kmeans-wasm-node` and
+`docs/wasm`. The 8,473 bytes of function bodies dropped from 64,417 to
+55,944. The biggest function is $0, about 15.4 KB: the generic `emeans` core
+with the inlined nearest scans. The batch/step laws still call `powf`, so
+`pow` remains; the older `log`/`exp` functions are gone.
+
+Quality and speed on the four photographs are unchanged to noise: a single
+harness run after the change is a median of 5.8x at 5 epochs (was 5.6x), and
+the deterministic MSE against Lloyd at the seeded harness match or beat the
+previous build at every row except a 0.27% difference at `blue-marble`, which
+is inside the run-to-run variation of this machine.
+
 ## Measurement traps found the hard way
 
 - **Wall clock on this machine is not trustworthy**, and neither is a single sample
@@ -513,6 +662,48 @@ Release page for manual confirmation; with a repo-scoped token set, the Release 
 created automatically. Do not commit `.npmrc` or tokens. If a token is needed, use
 an npm granular access token with **Read and write (stage only)** permissions for
 `kmeans-wasm`, and never a bypass-2FA token for direct publishing.
+
+## WebAssembly threads are blocked twice, and e-means is too fine-grained for them
+
+The obvious question after the SIMD work is whether to use wasm threads. On the
+pinned toolchain they are not available, and the batch size makes them a loss even
+if they were.
+
+- **Stable std has no atomics for `wasm32-unknown-unknown`.** `rustc --print cfg
+  --target wasm32-unknown-unknown` lists `bulk-memory`, `multivalue`,
+  `mutable-globals`, `nontrapping-fptoint`, `reference-types` and `sign-ext`, but
+  not `atomics`. A tiny crate whose export calls
+  `std::thread::spawn(|| 7).join()` compiles, and then traps `unreachable` when
+  called. Rebuilding with `RUSTFLAGS="-C target-feature=+atomics,+bulk-memory,
+  +mutable-globals"` still traps, because the precompiled std was itself built
+  without atomics. A thread-capable std needs `-Z build-std`, which is nightly
+  only; this project pins stable 1.98.1, and `wasm-bindgen-rayon` has the same
+  requirement.
+- **Browser shared memory requires cross-origin isolation.** Measured in
+  Playwright Chromium on `http://localhost`: without COOP/COEP,
+  `crossOriginIsolated` is false, `SharedArrayBuffer` is undefined and
+  `new WebAssembly.Memory({initial: 1, maximum: 1, shared: true})` throws. With
+  `Cross-Origin-Opener-Policy: same-origin` and
+  `Cross-Origin-Embedder-Policy: require-corp`, all three succeed. Every consumer,
+  every CDN embedding the module and the GitHub Pages deployment would need those
+  headers before a threaded build could start.
+- **A worker pool without shared memory is worse.** Each worker needs a wasm
+  instance and a copy of its share of the rows, and the batch updates are
+  sequential, so only the assignment phase could overlap.
+- **The batch is smaller than the synchronization.** On blue-marble at k=32,
+  922,560 pixels and the default 4,096-point batch give 1,125 updates, so a
+  ~22 ms run spends about 20 μs per update. A trivial `postMessage` round trip to
+  one worker measured 75 μs in the same headless Chromium. The assignable part is
+  only about 14 μs of that update at this `k`, so a four-worker split would spend
+  more time coordinating than computing.
+- **The parts that dominate at low k cannot move.** The centroid sums are added in
+  ascending row order, and the centroids change after every batch. Reordering
+  either breaks the algorithm, so the parallel ceiling is the distance share
+  alone.
+
+Verdict: leave the package single-threaded. Revisit only with a nightly
+`build-std` pipeline, COOP/COEP on every deployment, and a much larger batch law
+than the one the five-pass default was measured with.
 
 ## WebGPU: the mapping is feasible and not worth doing, and both halves are now measured
 
