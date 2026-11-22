@@ -45,7 +45,7 @@ pub(super) fn initialize<S: Simd>(
         point_count
     ];
 
-    for (i, state) in point_states.iter_mut().enumerate() {
+    point_states.iter_mut().enumerate().for_each(|(i, state)| {
         let point_offset = i * dimensions;
         point_all_centers(
             simd,
@@ -62,7 +62,7 @@ pub(super) fn initialize<S: Simd>(
         for part in 0..dimensions {
             centroid_points_sum[sum_offset + part] += weight * points[point_offset + part];
         }
-    }
+    });
 
     InitializeResult {
         centroid_points_counts,
@@ -83,7 +83,34 @@ pub(super) fn initialize<S: Simd>(
 /// `known_centroid` lets the caller hand over a distance it already measured for
 /// one of the centroids, instead of having it computed twice. The scan order is
 /// unchanged, so ties still resolve to the lowest index.
-#[inline]
+/// The running minimum and runner-up distances for one point.
+#[derive(Clone, Copy)]
+struct PointDistances {
+    min_index: usize,
+    min_distance_squared: f64,
+    second_distance_squared: f64,
+}
+
+impl PointDistances {
+    fn new() -> Self {
+        Self {
+            min_index: 0,
+            min_distance_squared: f64::MAX,
+            second_distance_squared: f64::MAX,
+        }
+    }
+
+    fn consider(&mut self, index: usize, distance_squared: f64) {
+        if distance_squared < self.min_distance_squared {
+            self.second_distance_squared = self.min_distance_squared;
+            self.min_distance_squared = distance_squared;
+            self.min_index = index;
+        } else if distance_squared < self.second_distance_squared {
+            self.second_distance_squared = distance_squared;
+        }
+    }
+}
+
 pub(super) fn point_all_centers<S: Simd>(
     simd: S,
     point: &[f64],
@@ -93,28 +120,18 @@ pub(super) fn point_all_centers<S: Simd>(
     known_centroid: Option<(usize, f64)>,
     state: &mut PointState,
 ) {
-    let mut min_index = 0;
-    let mut min_distance_squared = f64::MAX;
-    let mut second_distance_squared = f64::MAX;
-
-    for j in 0..k {
+    let distances = (0..k).fold(PointDistances::new(), |mut seen, j| {
         let distance_squared = match known_centroid {
             Some((known, distance)) if known == j => distance,
             _ => get_distance_squared(simd, point, centroids, dimensions, j * dimensions),
         };
+        seen.consider(j, distance_squared);
+        seen
+    });
 
-        if distance_squared < min_distance_squared {
-            second_distance_squared = min_distance_squared;
-            min_distance_squared = distance_squared;
-            min_index = j;
-        } else if distance_squared < second_distance_squared {
-            second_distance_squared = distance_squared;
-        }
-    }
-
-    state.centroid = min_index as u32;
-    state.upper_bound = min_distance_squared.sqrt();
-    state.lower_bound = second_distance_squared.sqrt();
+    state.centroid = distances.min_index as u32;
+    state.upper_bound = distances.min_distance_squared.sqrt();
+    state.lower_bound = distances.second_distance_squared.sqrt();
 }
 
 pub(super) fn get_min_centroid_skip_point_centroid<S: Simd>(
@@ -125,19 +142,10 @@ pub(super) fn get_min_centroid_skip_point_centroid<S: Simd>(
     k: usize,
     point_centroid: usize,
 ) -> f64 {
-    let mut min_distance_squared = f64::MAX;
-
-    for j in 0..k {
-        if j == point_centroid {
-            continue;
-        }
-
-        let distance_squared =
-            get_distance_squared(simd, point, centroids, dimensions, j * dimensions);
-        if distance_squared < min_distance_squared {
-            min_distance_squared = distance_squared;
-        }
-    }
-
+    let min_distance_squared = (0..k)
+        .filter(|&j| j != point_centroid)
+        .map(|j| get_distance_squared(simd, point, centroids, dimensions, j * dimensions))
+        .min_by(|left, right| left.total_cmp(right))
+        .unwrap_or(f64::MAX);
     min_distance_squared.sqrt()
 }
