@@ -2,10 +2,11 @@
 
 This directory contains a small GitHub Pages comparison for `kmeans-wasm`.
 
-The page loads one public-domain Blue Marble image and renders three 16-color results: the packed
-`kmeans_rgb` WebAssembly method, the four-component `kmeans_rgba` WebAssembly method, and the
-MIT-licensed `skmeans` browser bundle. It also reports a median speed comparison between the three
-implementations. It deliberately does not include a larger application UI or image-upload controls.
+The page loads one public-domain Blue Marble image and renders four 16-color results: the packed
+`kmeans_rgb` WebAssembly method, the four-component `kmeans_rgba` WebAssembly method, the fixed-pass
+`emeans_rgb` WebAssembly method, and the MIT-licensed `skmeans` browser bundle. It also reports a
+median speed comparison between the four implementations. It deliberately does not include a larger
+application UI or image-upload controls.
 
 `kmeans_rgba` clusters `ImageData.data` directly, so the page passes the canvas pixels straight from
 `getImageData` to WebAssembly without repacking them. The demo image is fully opaque, so its palette

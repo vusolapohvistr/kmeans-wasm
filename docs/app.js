@@ -9,10 +9,12 @@ const RGBA_STRIDE = 4;
 const sourceCanvas = document.querySelector("#source-canvas");
 const rgbCanvas = document.querySelector("#rgb-canvas");
 const rgbaCanvas = document.querySelector("#rgba-canvas");
+const emeansCanvas = document.querySelector("#emeans-canvas");
 const skmeansCanvas = document.querySelector("#skmeans-canvas");
 const sourceContext = sourceCanvas.getContext("2d", { willReadFrequently: true });
 const rgbContext = rgbCanvas.getContext("2d");
 const rgbaContext = rgbaCanvas.getContext("2d");
+const emeansContext = emeansCanvas.getContext("2d");
 const skmeansContext = skmeansCanvas.getContext("2d");
 const status = document.querySelector("#status");
 const timingRows = document.querySelector("#timing-rows");
@@ -94,7 +96,7 @@ function prepareImage(image) {
   const width = Math.max(1, Math.round(image.naturalWidth * scale));
   const height = Math.max(1, Math.round(image.naturalHeight * scale));
 
-  for (const canvas of [sourceCanvas, rgbCanvas, rgbaCanvas, skmeansCanvas]) {
+  for (const canvas of [sourceCanvas, rgbCanvas, rgbaCanvas, emeansCanvas, skmeansCanvas]) {
     canvas.width = width;
     canvas.height = height;
   }
@@ -250,6 +252,16 @@ async function initialize() {
       milliseconds: rgbaRun.milliseconds,
     });
 
+    setStatus("Clustering with emeans_rgb…");
+    const emeansRun = measure(() => wasm.emeans_rgb(rgb, PALETTE_SIZE));
+    renderPaletteResult(emeansContext, width, height, rgb, RGB_STRIDE, emeansRun.result);
+    recordTiming({
+      method: "emeans_rgb",
+      input: "3 × u8",
+      timeId: "#emeans-time",
+      milliseconds: emeansRun.milliseconds,
+    });
+
     setStatus("Running skmeans for comparison…");
     const skmeansRun = measure(() =>
       window.skmeans(points, PALETTE_SIZE, undefined, MAX_ITERATIONS),
@@ -269,7 +281,7 @@ async function initialize() {
       milliseconds: skmeansRun.milliseconds,
     });
 
-    setStatus("All three results ready.");
+    setStatus("All four results ready.");
   } catch (error) {
     setStatus(`Could not run the comparison: ${error.message ?? error}`, true);
   }

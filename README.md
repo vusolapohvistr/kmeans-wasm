@@ -177,8 +177,8 @@ table probe. A tie goes to the lower palette index, matching the clustering core
 so a hand-written search with a strict `<` produces the same bytes. Pass `3` with
 `kmeans_rgb` and it writes an opaque alpha.
 
-Run a full working version, including a three-way speed comparison against
-`kmeans_rgb` and `skmeans`, at
+Run a full working version, including a four-way speed comparison against
+`kmeans_rgb`, `emeans_rgb`, and `skmeans`, at
 [vusolapohvistr.github.io/kmeans-wasm](https://vusolapohvistr.github.io/kmeans-wasm/).
 
 ### e-means: a pass budget instead of a convergence test

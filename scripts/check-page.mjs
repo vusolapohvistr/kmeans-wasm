@@ -122,11 +122,13 @@ const ids = [
   "source-canvas",
   "rgb-canvas",
   "rgba-canvas",
+  "emeans-canvas",
   "skmeans-canvas",
   "status",
   "timing-rows",
   "rgb-time",
   "rgba-time",
+  "emeans-time",
   "skmeans-time",
   "map-time",
   "source-size",
@@ -230,7 +232,7 @@ check(
 // The page clusters to 16 colours, so anything above one means a real palette
 // was applied. Asserting an exact count would be brittle; the alpha check below
 // is the exact one.
-for (const id of ["rgb-canvas", "rgba-canvas", "skmeans-canvas"]) {
+for (const id of ["rgb-canvas", "rgba-canvas", "emeans-canvas", "skmeans-canvas"]) {
   check(canvases.get(id).painted !== null, `${id} was never painted`);
   check(
     distinctColours(id) > 1,
@@ -251,7 +253,7 @@ check(
 );
 
 // A clustering that silently did no work reports a suspiciously zero duration.
-for (const id of ["rgb-time", "rgba-time", "skmeans-time"]) {
+for (const id of ["rgb-time", "rgba-time", "emeans-time", "skmeans-time"]) {
   check(
     elements.get(id).textContent !== "—",
     `${id} was never filled in, so clustering did not run`,
@@ -261,9 +263,9 @@ for (const id of ["rgb-time", "rgba-time", "skmeans-time"]) {
 const rows = elements
   .get("timing-rows")
   .children.map((row) => row.children.map((cell) => cell.textContent));
-// Four rows: the three clustering implementations plus apply_palette, which is a
+// Five rows: the four clustering implementations plus apply_palette, which is a
 // cost on top of kmeans_rgb rather than a comparison with it.
-check(rows.length === 4, `expected 4 timing rows, got ${rows.length}`);
+check(rows.length === 5, `expected 5 timing rows, got ${rows.length}`);
 check(
   elements.get("map-time").textContent !== "—",
   "map-time was never filled in, so the mapping half of quantization was not measured",
@@ -292,12 +294,12 @@ check(
 if (failures.length > 0) {
   console.error(`\nplayground page check failed:\n${failures.map((f) => `  - ${f}`).join("\n")}`);
   console.error(`\nstatus was: ${status.textContent}`);
-  for (const id of ["rgb-time", "rgba-time", "skmeans-time"]) {
+  for (const id of ["rgb-time", "rgba-time", "emeans-time", "skmeans-time"]) {
     console.error(`${id}: ${elements.get(id).textContent}`);
   }
   process.exit(1);
 }
 
 console.log("playground page check passed");
-console.log(`  timings: rgb ${elements.get("rgb-time").textContent}, rgba ${elements.get("rgba-time").textContent}, skmeans ${elements.get("skmeans-time").textContent}`);
+console.log(`  timings: rgb ${elements.get("rgb-time").textContent}, rgba ${elements.get("rgba-time").textContent}, emeans ${elements.get("emeans-time").textContent}, skmeans ${elements.get("skmeans-time").textContent}`);
 for (const row of rows) console.log(`  ${row.join(" | ")}`);
