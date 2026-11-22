@@ -28,7 +28,9 @@ mod update;
 mod util;
 
 use assignment::{nearest_centroid, nearest_centroid_fixed};
-use laws::{resolve_alpha0, resolve_batch_size, scheduled_alpha};
+use laws::{
+    batch_size_from_raw, resolve_alpha0_from_n_k_epochs, resolve_batch_raw, scheduled_alpha,
+};
 use update::{apply_batch, revive_unused, transpose_centroids};
 use util::{Scramble, shuffle};
 
@@ -177,8 +179,14 @@ pub fn emeans<S: Simd>(
     };
     let total_weight = total_weight.max(f64::MIN_POSITIVE);
 
-    let batch_size = resolve_batch_size(total_weight, k, epochs, dimensions, options.batch_size);
-    let alpha0 = resolve_alpha0(total_weight, k, epochs, batch_size);
+    let point_total = total_weight.ceil().min(usize::MAX as f64) as usize;
+    let batch_size = if let Some(given) = options.batch_size {
+        given.clamp(1, point_total)
+    } else {
+        let raw = resolve_batch_raw(total_weight, k, epochs, dimensions, None);
+        batch_size_from_raw(raw, total_weight, dimensions)
+    };
+    let alpha0 = resolve_alpha0_from_n_k_epochs(total_weight, k, epochs, dimensions);
     let revival_threshold = options.revival_threshold.unwrap_or(
         if dimensions <= NO_REVIVAL_MAX_DIMENSIONS || k > point_count {
             0.0
@@ -369,6 +377,7 @@ mod tests {
     use super::laws::round_to_power_of_two;
     use super::*;
     use fearless_simd::Level;
+    use laws::{resolve_alpha0_from_n_k_epochs, resolve_batch_size};
 
     fn points(count: usize, dimensions: usize) -> Vec<f64> {
         let mut state = 0x2545_f491_4f6c_dd1d_u64;
@@ -410,8 +419,8 @@ mod tests {
 
     #[test]
     fn the_step_law_is_clamped() {
-        assert!((1e-4..=1.0).contains(&resolve_alpha0(1.0, 2, 1, 1)));
-        assert!((1e-4..=1.0).contains(&resolve_alpha0(1e12, 1_000_000, 25, 1)));
+        assert!((1e-4..=1.0).contains(&resolve_alpha0_from_n_k_epochs(1.0, 2, 1, 3)));
+        assert!((1e-4..=1.0).contains(&resolve_alpha0_from_n_k_epochs(1e12, 1_000_000, 25, 3)));
     }
 
     #[test]
