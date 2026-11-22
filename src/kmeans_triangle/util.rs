@@ -149,22 +149,24 @@ pub fn get_distance_squared<S: Simd>(
     crate::work::count_one(&crate::work::DISTANCE_EVALUATIONS);
 
     let centroid = &centroids[centroid_offset..centroid_offset + dimensions];
+    let even = dimensions - (dimensions % 2);
     let mut accumulator = f64x2::<S>::splat(simd, 0.0);
-    let mut part = 0;
 
-    while part + 2 <= dimensions {
-        let left = f64x2::<S>::from_slice(simd, &point[part..part + 2]);
-        let right = f64x2::<S>::from_slice(simd, &centroid[part..part + 2]);
-        let difference = left - right;
+    for (point_pair, centroid_pair) in point[..even]
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .zip(centroid[..even].as_chunks::<2>().0.iter())
+    {
+        let difference = f64x2::<S>::from_slice(simd, point_pair.as_slice())
+            - f64x2::<S>::from_slice(simd, centroid_pair.as_slice());
         accumulator += difference * difference;
-        part += 2;
     }
 
     let mut sum = accumulator[0] + accumulator[1];
-    while part < dimensions {
-        let difference = point[part] - centroid[part];
+    for (point_value, centroid_value) in point[even..].iter().zip(centroid[even..].iter()) {
+        let difference = point_value - centroid_value;
         sum += difference * difference;
-        part += 1;
     }
 
     sum
