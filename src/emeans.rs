@@ -229,17 +229,7 @@ pub fn emeans<S: Simd>(
     // The chunks depend only on the weights, so build the multiset once and
     // reshuffle it for each epoch. Shuffling an already-shuffled sequence is
     // still uniform, and rebuilding it every epoch only repeated 5n pushes.
-    let mut chunks: Vec<(usize, f64)> = Vec::with_capacity(point_count);
-    for row in 0..point_count {
-        let mut remaining = weights.map_or(1.0, |all| all[row]);
-        while remaining > chunk_capacity {
-            chunks.push((row, chunk_capacity));
-            remaining -= chunk_capacity;
-        }
-        if remaining > 0.0 {
-            chunks.push((row, remaining));
-        }
-    }
+    let mut chunks = build_chunks(weights, point_count, chunk_capacity);
     let mut assignments = options.capture_assignments.then(|| vec![0u32; point_count]);
     if chunks.is_empty() {
         return EmeansResult {
@@ -351,15 +341,7 @@ pub fn emeans<S: Simd>(
         }
     }
 
-    for (cluster, count) in pass_counts.iter().enumerate() {
-        if *count > 0.0 {
-            let base = cluster * dimensions;
-            let count = *count;
-            for part in 0..dimensions {
-                centroids[base + part] = pass_sums[base + part] / count;
-            }
-        }
-    }
+    finalize_centroids(&pass_counts, &pass_sums, &mut centroids, dimensions);
 
     EmeansResult {
         centroids,
@@ -370,6 +352,44 @@ pub fn emeans<S: Simd>(
         alpha0,
         assignments,
     }
+}
+
+/// Split rows into shuffled chunks, splitting heavy rows so no chunk is larger
+/// than `chunk_capacity`.
+fn build_chunks(
+    weights: Option<&[f64]>,
+    point_count: usize,
+    chunk_capacity: f64,
+) -> Vec<(usize, f64)> {
+    let mut chunks = Vec::with_capacity(point_count);
+    for row in 0..point_count {
+        let mut remaining = weights.map_or(1.0, |all| all[row]);
+        while remaining > chunk_capacity {
+            chunks.push((row, chunk_capacity));
+            remaining -= chunk_capacity;
+        }
+        if remaining > 0.0 {
+            chunks.push((row, remaining));
+        }
+    }
+    chunks
+}
+
+/// Replace each non-empty position with its mean over the final pass.
+fn finalize_centroids(
+    pass_counts: &[f64],
+    pass_sums: &[f64],
+    centroids: &mut [f64],
+    dimensions: usize,
+) {
+    pass_counts.iter().enumerate().for_each(|(cluster, count)| {
+        if *count > 0.0 {
+            let base = cluster * dimensions;
+            for part in 0..dimensions {
+                centroids[base + part] = pass_sums[base + part] / *count;
+            }
+        }
+    });
 }
 
 #[cfg(test)]
