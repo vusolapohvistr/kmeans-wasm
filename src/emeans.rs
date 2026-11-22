@@ -244,16 +244,18 @@ pub fn emeans<S: Simd>(
     }
     let mut transposed = vec![0.0f64; dimensions * k];
     transpose_centroids(&centroids, dimensions, k, &mut transposed);
-    let mut batch_counts = vec![0.0f64; k];
-    let mut batch_sums = vec![0.0f64; k * dimensions];
+    // Counts and sums share one allocation; `apply_batch` borrows the two halves
+    // as separate slices.
+    let mut batch_stats = vec![0.0f64; k + k * dimensions];
+    let (batch_counts, batch_sums) = batch_stats.split_at_mut(k);
     let mut touched = Vec::with_capacity(k.min(point_count));
     let mut touched_flags = vec![false; k];
 
     // Last-epoch-mean finalization: accumulate the assignments made during the
     // final pass, then replace each non-empty position by that mean. A cluster
     // that receives nothing keeps its current position rather than becoming NaN.
-    let mut pass_counts = vec![0.0f64; k];
-    let mut pass_sums = vec![0.0f64; k * dimensions];
+    let mut pass_stats = vec![0.0f64; k + k * dimensions];
+    let (pass_counts, pass_sums) = pass_stats.split_at_mut(k);
 
     for epoch in 0..epochs {
         shuffle(&mut chunks, &mut random);
@@ -310,8 +312,8 @@ pub fn emeans<S: Simd>(
                 &mut centroids,
                 &mut usage,
                 dimensions,
-                &batch_counts,
-                &batch_sums,
+                batch_counts,
+                batch_sums,
                 &touched,
                 alpha,
             );
@@ -341,7 +343,7 @@ pub fn emeans<S: Simd>(
         }
     }
 
-    finalize_centroids(&pass_counts, &pass_sums, &mut centroids, dimensions);
+    finalize_centroids(pass_counts, pass_sums, &mut centroids, dimensions);
 
     EmeansResult {
         centroids,

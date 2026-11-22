@@ -118,13 +118,7 @@ pub(super) fn revive_unused(
 
     let mean = usage.iter().sum::<f64>() / usage.len() as f64;
     let cutoff = threshold * mean;
-
-    let unused: Vec<usize> = usage
-        .iter()
-        .enumerate()
-        .filter_map(|(cluster, mass)| (*mass < cutoff).then_some(cluster))
-        .collect();
-    if unused.is_empty() {
+    if !usage.iter().any(|mass| *mass < cutoff) {
         return 0;
     }
 
@@ -132,55 +126,49 @@ pub(super) fn revive_unused(
     // remaining donor mass. This is the same distribution as the
     // Efraimidis-Spirakis `log(u) / weight` keys, but it needs one draw per
     // split rather than one per cluster, and it avoids sorting a key per
-    // cluster. A donor chosen for one under-used slot cannot be chosen again,
-    // so it is blocked after use.
-    let mut blocked = vec![false; usage.len()];
-    for &cluster in &unused {
-        blocked[cluster] = true;
-    }
+    // cluster. Targets are temporarily zeroed so they cannot be drawn again,
+    // and donors are zeroed after use.
     let mut splits = 0;
-    for &target in &unused {
-        let total = donor_sum(usage, &blocked);
+    for target in 0..usage.len() {
+        let target_mass = usage[target];
+        if target_mass >= cutoff {
+            continue;
+        }
+        usage[target] = 0.0;
+
+        let total = donor_sum(usage);
         if total <= 0.0 {
+            usage[target] = target_mass;
             break;
         }
-
         let pick = random.next() * total;
-        let Some(donor) = donor_pick(usage, &blocked, pick) else {
+        let Some(donor) = donor_pick(usage, pick) else {
+            usage[target] = target_mass;
             break;
         };
+        let donor_mass = usage[donor];
 
         split_centroid(centroids, dimensions, donor, target);
-        let half = usage[donor] / 2.0;
-        usage[donor] = half;
-        usage[target] = half;
-        blocked[donor] = true;
+        usage[donor] = 0.0;
+        usage[target] = donor_mass / 2.0;
         splits += 1;
     }
 
     splits
 }
 
-fn donor_sum(usage: &[f64], blocked: &[bool]) -> f64 {
-    let mut total = 0.0;
-    for (mass, blocked) in usage.iter().zip(blocked.iter()) {
-        if !*blocked && *mass > 0.0 {
-            total += *mass;
-        }
-    }
-    total
+fn donor_sum(usage: &[f64]) -> f64 {
+    usage.iter().copied().filter(|mass| *mass > 0.0).sum()
 }
 
-fn donor_pick(usage: &[f64], blocked: &[bool], pick: f64) -> Option<usize> {
+fn donor_pick(usage: &[f64], pick: f64) -> Option<usize> {
     let mut cumulative = 0.0;
-    for (cluster, mass) in usage.iter().enumerate() {
-        if blocked[cluster] || *mass <= 0.0 {
-            continue;
-        }
-        cumulative += *mass;
-        if cumulative >= pick {
-            return Some(cluster);
-        }
-    }
-    None
+    usage
+        .iter()
+        .enumerate()
+        .filter(|(_, mass)| **mass > 0.0)
+        .find_map(|(cluster, mass)| {
+            cumulative += *mass;
+            (cumulative >= pick).then_some(cluster)
+        })
 }
