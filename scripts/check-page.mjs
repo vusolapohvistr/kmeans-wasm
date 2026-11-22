@@ -22,6 +22,7 @@ import { resolve } from "node:path";
 const DOCS = resolve(import.meta.dirname, "..", "docs");
 const WIDTH = 64;
 const HEIGHT = 64;
+const PALETTE_SIZE = 16;
 const OPAQUE_ALPHA = 255;
 const TRANSPARENT_ALPHA = 40;
 
@@ -237,6 +238,10 @@ for (const id of ["rgb-canvas", "rgba-canvas", "emeans-canvas", "skmeans-canvas"
   check(
     distinctColours(id) > 1,
     `${id} rendered ${distinctColours(id)} distinct colours, expected a real palette`,
+  );
+  check(
+    distinctColours(id) <= PALETTE_SIZE,
+    `${id} rendered ${distinctColours(id)} distinct colours, more than the ${PALETTE_SIZE}-colour palette`,
   );
 }
 
