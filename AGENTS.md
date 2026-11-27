@@ -6,18 +6,23 @@ changing anything; it records the things that are expensive to rediscover.
 ## What the project is
 
 A Hamerly k-means and e-means implementation in Rust compiled to WebAssembly,
-published to npm as `kmeans-wasm`. Six public clustering entry points and one
-mapping entry point:
+published to npm as `kmeans-wasm`. Thirteen public clustering and mapping entry points:
 
 | Export | Input | Returns | Notes |
 | --- | --- | --- | --- |
-| `kmeans_rgb` | `Uint8Array`, 3 components per point | `Uint8Array` of centroids | packed color path |
-| `kmeans_rgba` | `Uint8Array`, 4 components per point | `Uint8Array` of centroids | clusters alpha too |
-| `kmeans` | `Array<Array<number>>` | object with `k`, `it`, `centroids`, `idxs`, `test` | arbitrary dimensions |
-| `emeans_rgb` | `Uint8Array`, 3 components per point | `Uint8Array` of centroids | stochastic, fixed pass budget |
-| `emeans_rgba` | `Uint8Array`, 4 components per point | `Uint8Array` of centroids | stochastic, clusters alpha |
-| `emeans` | `Array<Array<number>>` | object with `k`, `it`, `centroids`, `idxs`, `test` | arbitrary dimensions |
-| `apply_palette` | `Uint8Array`, a palette | `Uint8Array` of RGBA pixels | maps a palette onto an image |
+| `kmeans_rgb` | `Uint8Array \| Uint8ClampedArray`, 3/px | `Uint8Array` of centroids | packed color path |
+| `kmeans_rgba` | `Uint8Array \| Uint8ClampedArray`, 4/px | `Uint8Array` of centroids | clusters alpha too |
+| `kmeans_f64` | `Float64Array`, `dimensions` | `{ k, it, dimensions, centroids, idxs }` | flat typed vector path |
+| `kmeans_f32` | `Float32Array`, `dimensions` | `{ k, it, dimensions, centroids, idxs }` | flat f32 vector path |
+| `kmeans` | `Array<Array<number>>` | `{ k, it, centroids, idxs, test }` | arbitrary dimensions |
+| `emeans_rgb` | `Uint8Array \| Uint8ClampedArray`, 3/px | `Uint8Array` of centroids | stochastic, fixed pass budget |
+| `emeans_rgba` | `Uint8Array \| Uint8ClampedArray`, 4/px | `Uint8Array` of centroids | stochastic, clusters alpha |
+| `emeans_f64` | `Float64Array`, `dimensions` | `{ k, it, dimensions, centroids, idxs }` | flat typed vector path |
+| `emeans_f32` | `Float32Array`, `dimensions` | `{ k, it, dimensions, centroids, idxs }` | flat f32 vector path |
+| `emeans` | `Array<Array<number>>` | `{ k, it, centroids, idxs, test }` | arbitrary dimensions |
+| `apply_palette` | `Uint8Array \| Uint8ClampedArray`, a palette | `Uint8Array` of RGBA pixels | maps a palette onto an image |
+| `apply_palette_indices` | `Uint8Array \| Uint8ClampedArray`, a palette | `Uint32Array` of palette indices | palette index per pixel |
+| `apply_palette_dithered` | `Uint8Array \| Uint8ClampedArray`, `width`, `height`, palette | `Uint8Array` of RGBA pixels | Floyd–Steinberg dithered |
 
 `kmeans` and `emeans` return a JS object, so they are only usable from
 JavaScript. The `js_sys` calls abort the process on native targets, which is why
@@ -166,11 +171,12 @@ in the browser as `Could not run the comparison: unreachable` with no stack.
 
 ## Invariants that must not break
 
-**Clustering output is bit-for-bit stable.** Consumers depend on reproducible
-palettes, and the published benchmark tables assume the arithmetic does not
+**Clustering output is bit-for-bit stable for `hamerly_kmeans*`.** Consumers depend on reproducible
+palettes, and the published benchmark tables assume the core arithmetic does not
 drift. `src/kmeans_triangle.rs` has a `tests` module that fingerprints the
 iteration count, every centroid bit pattern and every assignment with FNV-1a
-across five shape combinations. If you change the arithmetic on purpose, that is
+across five shape combinations. (Note: `quantize_packed_colors` rounds final `u8`
+output with `.round().clamp(0.0, 255.0) as u8`.) If you change the core arithmetic on purpose, that is
 the test you re-record, and it must be a deliberate, reviewed decision.
 
 Two subtleties that are easy to break:
@@ -281,9 +287,7 @@ so.
 
 Roughly in the order they seemed most promising:
 
-- The `kmeans` JS boundary still copies every point from a JS array into the flat
-  buffer. That interop cost is visible in the published table as the gap between
-  `kmeans` and `kmeans_rgb`, and it dominates for small inputs.
+- **The `kmeans` JS boundary copies nested JS arrays, whereas `kmeans_f64` / `kmeans_f32` avoid per-row JS marshaling.** Use the flat typed-array entry points when vectors already live in a `Float64Array` or `Float32Array`.
 - The bounds are stored as distances because Hamerly's update is additive in
   distance space, so the square roots cannot be removed without changing the
   algorithm.

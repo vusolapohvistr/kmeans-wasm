@@ -2,18 +2,67 @@
 
 use crate::emeans::util::Scramble;
 
-/// Transposes flat row-major centroids into the dimension-major layout used by
-/// the paired assignment scan: `transposed[part * k + cluster]`.
-pub(super) fn transpose_centroids(
+/// Packs row-major `f64` centroids into 2-lane panels (`k_pairs * dimensions * 2`),
+/// padding any odd trailing centroid slot with `f64::INFINITY`.
+pub(super) fn pack_centroids_f64_panels(
     centroids: &[f64],
     dimensions: usize,
     k: usize,
-    transposed: &mut [f64],
+    panels: &mut [f64],
 ) {
-    for (cluster, row) in centroids.chunks_exact(dimensions).enumerate() {
-        for (part, value) in row.iter().enumerate() {
-            transposed[part * k + cluster] = *value;
+    let k_pairs = k.div_ceil(2);
+    panels.fill(f64::INFINITY);
+    for pair in 0..k_pairs {
+        let c0 = pair * 2;
+        let c1 = c0 + 1;
+        let base = pair * dimensions * 2;
+        let row0 = &centroids[c0 * dimensions..(c0 + 1) * dimensions];
+        if c1 < k {
+            let row1 = &centroids[c1 * dimensions..(c1 + 1) * dimensions];
+            for part in 0..dimensions {
+                panels[base + part * 2] = row0[part];
+                panels[base + part * 2 + 1] = row1[part];
+            }
+        } else {
+            for part in 0..dimensions {
+                panels[base + part * 2] = row0[part];
+            }
         }
+    }
+}
+
+/// Packs row-major `f64` centroids into 4-lane `f32` panels (`k_panels * dimensions * 4`),
+/// padding unused cluster lanes with `f32::INFINITY`.
+pub(super) fn pack_centroids_f32_panels(centroids: &[f64], dimensions: usize, panels: &mut [f32]) {
+    panels.fill(f32::INFINITY);
+    for (cluster, row) in centroids.chunks_exact(dimensions).enumerate() {
+        let panel = (cluster >> 2) * dimensions * 4;
+        let lane = cluster & 3;
+        for (part, value) in row.iter().enumerate() {
+            panels[panel + part * 4 + lane] = *value as f32;
+        }
+    }
+}
+
+/// Packs row-major `f64` centroids for 3D or 4D `f32x4` dot-product searches into
+/// contiguous 16-float (`[cx0..3, cy0..3, cz0..3, hns0..3]`) or 20-float panels.
+pub(super) fn pack_centroids_f32_dot_panels(
+    centroids: &[f64],
+    dimensions: usize,
+    panels: &mut [f32],
+) {
+    let stride = (dimensions + 1) * 4;
+    panels.fill(f32::INFINITY);
+    for (cluster, row) in centroids.chunks_exact(dimensions).enumerate() {
+        let panel = (cluster >> 2) * stride;
+        let lane = cluster & 3;
+        let mut norm_sq = 0.0f32;
+        for (part, value) in row.iter().enumerate() {
+            let v = *value as f32;
+            panels[panel + part * 4 + lane] = v;
+            norm_sq += v * v;
+        }
+        panels[panel + dimensions * 4 + lane] = 0.5 * norm_sq;
     }
 }
 
@@ -126,48 +175,56 @@ pub(super) fn revive_unused(
     // remaining donor mass. This is the same distribution as the
     // Efraimidis-Spirakis `log(u) / weight` keys, but it needs one draw per
     // split rather than one per cluster, and it avoids sorting a key per
-    // cluster. Targets are temporarily zeroed so they cannot be drawn again,
-    // and donors are zeroed after use.
-    let mut splits = 0;
-    for target in 0..usage.len() {
-        let target_mass = usage[target];
-        if target_mass >= cutoff {
-            continue;
-        }
-        usage[target] = 0.0;
+    // cluster. A donor chosen for one under-used slot cannot be chosen again,
+    // and under-used targets cannot serve as donors.
+    let unused: Vec<usize> = usage
+        .iter()
+        .enumerate()
+        .filter_map(|(cluster, mass)| (*mass < cutoff).then_some(cluster))
+        .collect();
+    let mut blocked = vec![false; usage.len()];
+    for &cluster in &unused {
+        blocked[cluster] = true;
+    }
 
-        let total = donor_sum(usage);
+    let mut splits = 0;
+    for &target in &unused {
+        let total = donor_sum(usage, &blocked);
         if total <= 0.0 {
-            usage[target] = target_mass;
             break;
         }
         let pick = random.next() * total;
-        let Some(donor) = donor_pick(usage, pick) else {
-            usage[target] = target_mass;
+        let Some(donor) = donor_pick(usage, &blocked, pick) else {
             break;
         };
-        let donor_mass = usage[donor];
 
         split_centroid(centroids, dimensions, donor, target);
-        usage[donor] = 0.0;
-        usage[target] = donor_mass / 2.0;
+        let half = usage[donor] / 2.0;
+        usage[donor] = half;
+        usage[target] = half;
+        blocked[donor] = true;
         splits += 1;
     }
 
     splits
 }
 
-fn donor_sum(usage: &[f64]) -> f64 {
-    usage.iter().copied().filter(|mass| *mass > 0.0).sum()
+fn donor_sum(usage: &[f64], blocked: &[bool]) -> f64 {
+    usage
+        .iter()
+        .zip(blocked.iter())
+        .filter_map(|(mass, is_blocked)| (!*is_blocked && *mass > 0.0).then_some(*mass))
+        .sum()
 }
 
-fn donor_pick(usage: &[f64], pick: f64) -> Option<usize> {
+fn donor_pick(usage: &[f64], blocked: &[bool], pick: f64) -> Option<usize> {
     let mut cumulative = 0.0;
     usage
         .iter()
+        .zip(blocked.iter())
         .enumerate()
-        .filter(|(_, mass)| **mass > 0.0)
-        .find_map(|(cluster, mass)| {
+        .filter(|(_, (mass, is_blocked))| !**is_blocked && **mass > 0.0)
+        .find_map(|(cluster, (mass, _))| {
             cumulative += *mass;
             (cumulative >= pick).then_some(cluster)
         })

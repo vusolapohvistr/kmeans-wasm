@@ -194,6 +194,7 @@ fn the_reduction_is_exact_from_the_same_starting_colours() {
             Optional {
                 weights: Some(&collapsed.weights),
                 initial_centroids: Some(&seeds),
+                seed: None,
             },
         );
 
@@ -347,6 +348,7 @@ fn the_reduction_is_exact_from_many_random_starts() {
                 Optional {
                     weights: Some(&collapsed.weights),
                     initial_centroids: Some(&seeds),
+                    seed: None,
                 },
             );
 

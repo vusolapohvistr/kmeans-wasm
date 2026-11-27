@@ -49,13 +49,24 @@ jobs:
           toolchain: 1.98.1
           targets: wasm32-unknown-unknown
 
+      - name: Cache Cargo and build artifacts
+        uses: Swatinem/rust-cache@v2
+
       - name: Install npm
         run: npm install --global npm@12.1.0
 
       - name: Install JavaScript tooling
         run: npm ci
 
+      - name: Cache wasm-pack
+        id: cache-wasm-pack
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/wasm-pack
+          key: ${{ runner.os }}-wasm-pack-0.15.0
+
       - name: Install wasm-pack
+        if: steps.cache-wasm-pack.outputs.cache-hit != 'true'
         run: cargo install wasm-pack --version 0.15.0 --locked
 
       - name: Build browser package

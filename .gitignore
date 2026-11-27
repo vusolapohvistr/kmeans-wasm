@@ -12,3 +12,4 @@ kmeans-wasm-node
 # browser test tooling, fetched by scripts/run-web-tests.mjs
 .browsers/
 webdriver.json
+.cargo-ok

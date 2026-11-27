@@ -5,7 +5,7 @@
 //! because that is what callers do today and any difference would show up as a
 //! subtly wrong image rather than an error.
 
-use kmeans_wasm::apply_palette;
+use kmeans_wasm::{apply_palette, apply_palette_dithered, apply_palette_indices};
 
 /// A deliberately naive reference: search the whole palette for every pixel,
 /// with a strict `<` so a tie keeps the lower index. This is the loop a caller
@@ -81,12 +81,24 @@ fn matches_a_per_pixel_search_over_many_shapes() {
             for entries in [1usize, 2, 3, 8, 64] {
                 let palette = palette_of(entries, components);
                 let pixels = pixels_of(pixels_count, components, distinct);
-                let got = apply_palette(pixels.clone(), palette.clone(), components).unwrap();
+                let got = apply_palette(&pixels, &palette, components).unwrap();
                 let want = reference(&pixels, &palette, components);
                 assert_eq!(
                     got, want,
                     "{pixels_count} px, {distinct} distinct, {entries} entries, {components} components"
                 );
+                let indices = apply_palette_indices(&pixels, &palette, components).unwrap();
+                assert_eq!(indices.len(), pixels_count);
+                for (px_idx, &entry_idx) in indices.iter().enumerate() {
+                    let base = entry_idx as usize * components;
+                    let out = px_idx * 4;
+                    assert_eq!(got[out], palette[base]);
+                    assert_eq!(got[out + 1], palette[base + 1]);
+                    assert_eq!(got[out + 2], palette[base + 2]);
+                    if components == 4 {
+                        assert_eq!(got[out + 3], palette[base + 3]);
+                    }
+                }
             }
         }
     }
@@ -99,7 +111,7 @@ fn ties_resolve_to_the_lower_index() {
     let palette = vec![10u8, 20, 30, 10, 20, 30];
     let pixels = vec![10u8, 20, 30, 200, 100, 50, 11, 20, 30];
 
-    let mapped = apply_palette(pixels, palette, 3).unwrap();
+    let mapped = apply_palette(&pixels, &palette, 3).unwrap();
 
     // Entries 0 and 1 are identical, so the first three channels are entry 0's.
     assert_eq!(&mapped[0..3], &[10, 20, 30]);
@@ -118,24 +130,24 @@ fn alpha_is_carried_through_and_synthesised() {
     let palette = vec![10u8, 20, 30, 0, 90, 80, 70, 255];
     let pixels = vec![10u8, 20, 30, 0, 90, 80, 70, 255];
 
-    let mapped = apply_palette(pixels, palette, 4).unwrap();
+    let mapped = apply_palette(&pixels, &palette, 4).unwrap();
     assert_eq!(&mapped[0..4], &[10, 20, 30, 0], "transparent stays");
     assert_eq!(&mapped[4..8], &[90, 80, 70, 255], "opaque stays");
 
     // From an RGB source the alpha is always opaque, never read from the palette.
     let rgb_palette = vec![10u8, 20, 30];
-    let mapped = apply_palette(vec![10u8, 20, 30], rgb_palette, 3).unwrap();
+    let mapped = apply_palette(&[10u8, 20, 30], &rgb_palette, 3).unwrap();
     assert_eq!(&mapped, &[10, 20, 30, 255]);
 }
 
 #[test]
 fn output_is_always_rgba() {
     let palette = vec![0u8, 0, 0, 0, 0, 0];
-    let rgb = apply_palette(vec![1u8, 2, 3, 4, 5, 6, 7, 8, 9], palette.clone(), 3).unwrap();
+    let rgb = apply_palette(&[1u8, 2, 3, 4, 5, 6, 7, 8, 9], &palette, 3).unwrap();
     assert_eq!(rgb.len(), 3 * 4, "three pixels, four values each");
 
     let rgba_palette = vec![0u8, 0, 0, 0, 0, 0, 0, 0];
-    let rgba = apply_palette(vec![1u8, 2, 3, 4], rgba_palette, 4).unwrap();
+    let rgba = apply_palette(&[1u8, 2, 3, 4], &rgba_palette, 4).unwrap();
     assert_eq!(rgba.len(), 4);
 }
 
@@ -147,7 +159,7 @@ fn solid_black_is_a_key_not_an_empty_slot() {
     let mut pixels = vec![0u8; 3 * 900];
     pixels.extend_from_slice(&[255, 255, 255, 255, 255, 255, 255, 255, 255]);
 
-    let mapped = apply_palette(pixels.clone(), palette.clone(), 3).unwrap();
+    let mapped = apply_palette(&pixels, &palette, 3).unwrap();
     assert_eq!(mapped, reference(&pixels, &palette, 3));
     // The black pixels map to the black entry, the white ones to the white entry.
     assert_eq!(&mapped[0..3], &[0, 0, 0]);
@@ -160,8 +172,13 @@ fn solid_black_is_a_key_not_an_empty_slot() {
 #[test]
 fn an_empty_buffer_maps_to_an_empty_buffer() {
     let palette = vec![0u8, 0, 0];
+    assert_eq!(apply_palette(&[], &palette, 3).unwrap(), Vec::<u8>::new());
     assert_eq!(
-        apply_palette(Vec::new(), palette, 3).unwrap(),
+        apply_palette_indices(&[], &palette, 3).unwrap(),
+        Vec::<u32>::new()
+    );
+    assert_eq!(
+        apply_palette_dithered(&[], 0, 0, &palette, 3).unwrap(),
         Vec::<u8>::new()
     );
 }
@@ -198,8 +215,15 @@ fn the_fallback_path_agrees_when_the_table_cannot_be_built() {
     let palette: Vec<u8> = (0..(k * components))
         .map(|i| (i as u8).wrapping_mul(11))
         .collect();
-    let got = apply_palette(pixels.clone(), palette.clone(), components).unwrap();
+    let got = apply_palette(&pixels, &palette, components).unwrap();
     assert_eq!(got, reference(&pixels, &palette, components));
+    let indices = apply_palette_indices(&pixels, &palette, components).unwrap();
+    assert_eq!(indices.len(), DISTINCT);
+    for (idx, &entry) in indices.iter().enumerate() {
+        let base = entry as usize * components;
+        let out = idx * 4;
+        assert_eq!(got[out..out + 3], palette[base..base + 3]);
+    }
 }
 
 /// A single-entry palette, and a palette with duplicate entries so that ties are
@@ -212,14 +236,14 @@ fn degenerate_palettes() {
     // One entry: everything becomes it.
     let single = vec![7u8, 8, 9];
     assert_eq!(
-        apply_palette(pixels.clone(), single.clone(), components).unwrap(),
+        apply_palette(&pixels, &single, components).unwrap(),
         vec![7, 8, 9, 255, 7, 8, 9, 255, 7, 8, 9, 255, 7, 8, 9, 255]
     );
 
     // Duplicate entries: every pixel is exactly equidistant from entries 0 and 1
     // at best, and the strict comparison has to keep the lower one.
     let duplicated = vec![10u8, 20, 30, 10, 20, 30, 200, 100, 50];
-    let mapped = apply_palette(pixels.clone(), duplicated.clone(), components).unwrap();
+    let mapped = apply_palette(&pixels, &duplicated, components).unwrap();
     assert_eq!(&mapped[0..3], &[10, 20, 30], "a tie keeps the lower entry");
     assert_eq!(mapped, reference(&pixels, &duplicated, components));
 }
@@ -244,7 +268,7 @@ fn rgba_through_the_table() {
         .map(|i| (i as u8).wrapping_mul(7))
         .collect();
 
-    let got = apply_palette(pixels.clone(), palette.clone(), components).unwrap();
+    let got = apply_palette(&pixels, &palette, components).unwrap();
     assert_eq!(got, reference(&pixels, &palette, components));
     // Every alpha in the output came from the palette, never invented.
     let (got_rows, _) = got.as_chunks::<4>();
@@ -254,5 +278,43 @@ fn rgba_through_the_table() {
             palette_rows.contains(pixel),
             "{pixel:?} is not a palette entry"
         );
+    }
+}
+
+#[test]
+fn dithered_mapping_produces_palette_colours_and_diffuses_gradients() {
+    let width = 16;
+    let height = 8;
+    let mut pixels = Vec::with_capacity(width * height * 3);
+    for y in 0..height {
+        for x in 0..width {
+            let level = ((x * 255) / (width - 1)) as u8;
+            pixels.extend_from_slice(&[level, level, (y * 32) as u8]);
+        }
+    }
+    let palette = vec![0u8, 0, 0, 255, 255, 255];
+
+    let dithered = apply_palette_dithered(&pixels, width, height, &palette, 3).unwrap();
+    assert_eq!(dithered.len(), width * height * 4);
+    let (dithered_rows, _) = dithered.as_chunks::<4>();
+    assert!(dithered_rows.iter().all(|px| px[3] == 255));
+    for px in dithered_rows {
+        let triple = [px[0], px[1], px[2]];
+        assert!(
+            triple == [0, 0, 0] || triple == [255, 255, 255],
+            "unexpected non-palette pixel {triple:?}"
+        );
+    }
+    // Mid-gray pixels should produce a mix of black and white pixels via dithering.
+    let whites = dithered_rows.iter().filter(|px| px[0] == 255).count();
+    assert!(whites > 10 && whites < width * height - 10);
+
+    // RGBA dithering preserves palette alpha.
+    let rgba_pixels = vec![120u8, 120, 120, 200, 130, 130, 130, 50];
+    let rgba_palette = vec![0u8, 0, 0, 0, 255, 255, 255, 255];
+    let rgba_out = apply_palette_dithered(&rgba_pixels, 2, 1, &rgba_palette, 4).unwrap();
+    assert_eq!(rgba_out.len(), 8);
+    for &px in rgba_out.as_chunks::<4>().0 {
+        assert!(px == [0, 0, 0, 0] || px == [255, 255, 255, 255]);
     }
 }

@@ -1,7 +1,7 @@
 use std::hint::black_box;
 use std::time::Duration;
 
-use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use rand::{RngExt, rng};
 
 use kmeans_wasm::*;
@@ -32,18 +32,15 @@ fn criterion_benchmark(c: &mut Criterion) {
         let id = BenchmarkId::new("random_rgb", format!("{pixel_count}px_k{color_count}"));
 
         group.bench_with_input(id, &pixels, |b, pixels| {
-            b.iter_batched(
-                || pixels.clone(),
-                |pixels| {
-                    black_box(kmeans_rgb(
-                        pixels,
-                        color_count,
-                        MAX_ITERATIONS,
-                        Some(CONVERGENCE_THRESHOLD),
-                    ))
-                },
-                BatchSize::SmallInput,
-            )
+            b.iter(|| {
+                black_box(kmeans_rgb(
+                    pixels,
+                    color_count,
+                    MAX_ITERATIONS,
+                    Some(CONVERGENCE_THRESHOLD),
+                    None,
+                ))
+            })
         });
     }
 

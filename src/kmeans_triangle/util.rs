@@ -5,27 +5,41 @@ use fearless_simd::{Simd, SimdBase, f64x2};
 
 /// Entropy source for the initial centroid draw.
 ///
-/// The clustering algorithm below is shared, and only the random stream differs
-/// per target. On WebAssembly it has to come from `Math.random`, because that is
-/// what callers replace to make a run reproducible, for example the comparison
-/// page seeds it before every measurement. Natively it is a seeded stream so the
-/// test suite and the benchmarks stay repeatable.
+/// The clustering algorithm below is shared, and only the unseeded random stream
+/// differs per target. On WebAssembly `Random::new()` reads `Math.random`,
+/// because that is what callers replace when not passing an explicit seed.
+/// Natively `Random::new()` uses a fixed seeded stream so the test suite and
+/// benchmarks stay repeatable. `Random::from_seed` uses the same SplitMix64
+/// stream on every target.
 #[cfg(target_arch = "wasm32")]
-pub struct Random;
+pub enum Random {
+    Js,
+    Seeded(u64),
+}
 
 #[cfg(target_arch = "wasm32")]
 impl Random {
     pub fn new() -> Self {
-        Random
+        Random::Js
+    }
+
+    pub fn from_seed(seed: u32) -> Self {
+        Random::Seeded(u64::from(seed) ^ 0x9e37_79b9_7f4a_7c15)
     }
 
     pub fn next(&mut self) -> f64 {
-        js_sys::Math::random()
+        match self {
+            Random::Js => js_sys::Math::random(),
+            Random::Seeded(state) => splitmix64_next(state),
+        }
     }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub struct Random(rand::rngs::SmallRng);
+pub enum Random {
+    Default(rand::rngs::SmallRng),
+    Seeded(u64),
+}
 
 #[cfg(not(target_arch = "wasm32"))]
 impl Random {
@@ -33,12 +47,28 @@ impl Random {
         use rand::SeedableRng;
 
         // Fixed seed so the native test suite and the benchmarks stay repeatable.
-        Random(rand::rngs::SmallRng::seed_from_u64(0))
+        Random::Default(rand::rngs::SmallRng::seed_from_u64(0))
+    }
+
+    pub fn from_seed(seed: u32) -> Self {
+        Random::Seeded(u64::from(seed) ^ 0x9e37_79b9_7f4a_7c15)
     }
 
     pub fn next(&mut self) -> f64 {
-        rand::RngExt::random(&mut self.0)
+        match self {
+            Random::Default(rng) => rand::RngExt::random(rng),
+            Random::Seeded(state) => splitmix64_next(state),
+        }
     }
+}
+
+fn splitmix64_next(state: &mut u64) -> f64 {
+    *state = state.wrapping_add(0x9e37_79b9_7f4a_7c15);
+    let mut mixed = *state;
+    mixed = (mixed ^ (mixed >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    mixed = (mixed ^ (mixed >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    mixed ^= mixed >> 31;
+    (mixed >> 11) as f64 * (1.0 / 9_007_199_254_740_992.0)
 }
 
 /// Attempts to spend finding a value that is not already a centroid, per pick.
@@ -51,8 +81,12 @@ pub fn get_centroids(
     point_count: usize,
     k: usize,
     weights: Option<&[f64]>,
+    seed: Option<u32>,
 ) -> Vec<f64> {
-    let mut random = Random::new();
+    let mut random = match seed {
+        Some(seed) => Random::from_seed(seed),
+        None => Random::new(),
+    };
     get_centroids_with_random(points, dimensions, point_count, k, weights, &mut random)
 }
 
@@ -148,6 +182,7 @@ pub fn get_distance_squared<S: Simd>(
     #[cfg(feature = "counters")]
     crate::work::count_one(&crate::work::DISTANCE_EVALUATIONS);
 
+    let point = &point[..dimensions];
     let centroid = &centroids[centroid_offset..centroid_offset + dimensions];
     let even = dimensions - (dimensions % 2);
     let mut accumulator = f64x2::<S>::splat(simd, 0.0);
@@ -170,4 +205,64 @@ pub fn get_distance_squared<S: Simd>(
     }
 
     sum
+}
+
+/// Evaluates squared distances from `point` to 4 centroids in parallel with
+/// independent `f64x2` accumulators while matching `get_distance_squared`
+/// bit-for-bit.
+#[inline]
+pub fn distances_4x_f64<S: Simd>(
+    simd: S,
+    point: &[f64],
+    centroids: &[f64],
+    dimensions: usize,
+    offsets: [usize; 4],
+) -> [f64; 4] {
+    #[cfg(feature = "counters")]
+    crate::work::count(&crate::work::DISTANCE_EVALUATIONS, 4);
+
+    let point = &point[..dimensions];
+    let c0 = &centroids[offsets[0]..offsets[0] + dimensions];
+    let c1 = &centroids[offsets[1]..offsets[1] + dimensions];
+    let c2 = &centroids[offsets[2]..offsets[2] + dimensions];
+    let c3 = &centroids[offsets[3]..offsets[3] + dimensions];
+    let even = dimensions - (dimensions % 2);
+    let zero = f64x2::<S>::splat(simd, 0.0);
+    let mut a0 = zero;
+    let mut a1 = zero;
+    let mut a2 = zero;
+    let mut a3 = zero;
+
+    let mut part = 0;
+    while part < even {
+        let p = f64x2::<S>::from_slice(simd, &point[part..part + 2]);
+        let d0 = p - f64x2::<S>::from_slice(simd, &c0[part..part + 2]);
+        let d1 = p - f64x2::<S>::from_slice(simd, &c1[part..part + 2]);
+        let d2 = p - f64x2::<S>::from_slice(simd, &c2[part..part + 2]);
+        let d3 = p - f64x2::<S>::from_slice(simd, &c3[part..part + 2]);
+        a0 += d0 * d0;
+        a1 += d1 * d1;
+        a2 += d2 * d2;
+        a3 += d3 * d3;
+        part += 2;
+    }
+
+    let mut s0 = a0[0] + a0[1];
+    let mut s1 = a1[0] + a1[1];
+    let mut s2 = a2[0] + a2[1];
+    let mut s3 = a3[0] + a3[1];
+
+    if even < dimensions {
+        let pv = point[even];
+        let d0 = pv - c0[even];
+        let d1 = pv - c1[even];
+        let d2 = pv - c2[even];
+        let d3 = pv - c3[even];
+        s0 += d0 * d0;
+        s1 += d1 * d1;
+        s2 += d2 * d2;
+        s3 += d3 * d3;
+    }
+
+    [s0, s1, s2, s3]
 }

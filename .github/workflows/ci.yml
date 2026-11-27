@@ -38,13 +38,24 @@ jobs:
           components: clippy, rustfmt
           targets: wasm32-unknown-unknown
 
+      - name: Cache Cargo and build artifacts
+        uses: Swatinem/rust-cache@v2
+
       - name: Install npm
         run: npm install --global npm@12.1.0
 
       - name: Install JavaScript tooling
         run: npm ci
 
+      - name: Cache wasm-pack
+        id: cache-wasm-pack
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/wasm-pack
+          key: ${{ runner.os }}-wasm-pack-0.15.0
+
       - name: Install wasm-pack
+        if: steps.cache-wasm-pack.outputs.cache-hit != 'true'
         run: cargo install wasm-pack --version 0.15.0 --locked
 
       - name: Lint Rust
@@ -52,6 +63,9 @@ jobs:
 
       - name: Test native build
         run: npm test
+
+      - name: Check wasm test build
+        run: cargo check --locked --target wasm32-unknown-unknown --tests
 
       # Playwright's Chromium is used rather than whatever Chrome the image
       # ships with, because the wasm tests need a chromedriver of the exact same

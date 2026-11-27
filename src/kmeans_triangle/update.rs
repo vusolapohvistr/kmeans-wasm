@@ -19,12 +19,19 @@ pub struct Optional<'a> {
     /// This exists so a difference in the algorithm can be told apart from two
     /// different local optima, which is otherwise impossible to do from outside.
     pub initial_centroids: Option<&'a [f64]>,
+
+    /// Explicit deterministic seed for centroid initialization.
+    pub seed: Option<u32>,
 }
 
-pub(super) fn update_bounds(
-    centroid_distance_to_previous_position: &[f64], // p(j) – distance that c(j) last moved
-    point_states: &mut [super::initialize::PointState],
-) {
+/// Returns `(r as u32, move_r, move_r2)` where `r` is the cluster that moved
+/// most and `r_another` is the second largest move, or `None` for `k < 2`.
+pub(super) fn top_two_moves(
+    centroid_distance_to_previous_position: &[f64],
+) -> Option<(u32, f64, f64)> {
+    if centroid_distance_to_previous_position.len() < 2 {
+        return None;
+    }
     let r = centroid_distance_to_previous_position
         .iter()
         .enumerate()
@@ -38,18 +45,11 @@ pub(super) fn update_bounds(
         .max_by(|a, b| a.1.total_cmp(b.1))
         .unwrap()
         .0;
-
-    #[cfg(feature = "counters")]
-    crate::work::count(&crate::work::BOUND_UPDATES, point_states.len() as u64);
-
-    for state in point_states.iter_mut() {
-        state.upper_bound += centroid_distance_to_previous_position[state.centroid as usize];
-        if state.centroid as usize == r {
-            state.lower_bound -= centroid_distance_to_previous_position[r_another];
-        } else {
-            state.lower_bound -= centroid_distance_to_previous_position[r];
-        }
-    }
+    Some((
+        r as u32,
+        centroid_distance_to_previous_position[r],
+        centroid_distance_to_previous_position[r_another],
+    ))
 }
 
 pub(super) fn move_centers(

@@ -72,7 +72,8 @@ function makeRgbData(pixelCount: number): RgbData {
 
   for (let index = 0; index < pixelCount; index += 1) {
     const offset = index * 3;
-    const point = [next() & 0xff, (next() >>> 8) & 0xff, (next() >>> 16) & 0xff];
+    const drawn = next();
+    const point = [drawn & 0xff, (drawn >>> 8) & 0xff, (drawn >>> 16) & 0xff];
     rgb.set(point, offset);
     points[index] = point;
   }

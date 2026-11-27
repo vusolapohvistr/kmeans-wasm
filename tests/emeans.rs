@@ -45,7 +45,7 @@ fn quantizes_rgb_values() {
         255, 0, 255,
     ];
 
-    let palette = emeans_rgb(rgb, 3, Some(5), None).unwrap();
+    let palette = emeans_rgb(&rgb, 3, Some(5), None, None).unwrap();
 
     assert_eq!(palette.len(), 9);
 }
@@ -59,7 +59,7 @@ fn quantizes_rgba_values() {
         255, 255, 255, 0,
     ];
 
-    let palette = emeans_rgba(rgba, 4, Some(5), Some(2)).unwrap();
+    let palette = emeans_rgba(&rgba, 4, Some(5), Some(2), None).unwrap();
 
     assert_eq!(palette.len(), 16);
 }
@@ -71,7 +71,7 @@ fn clusters_the_alpha_channel() {
         rgba.extend_from_slice(&[index * 4, 128, 64, if index % 2 == 0 { 0 } else { 255 }]);
     }
 
-    let palette = emeans_rgba(rgba, 2, Some(5), None).unwrap();
+    let palette = emeans_rgba(&rgba, 2, Some(5), None, None).unwrap();
 
     let alphas = palette
         .as_chunks::<4>()
@@ -99,10 +99,29 @@ fn repeated_runs_are_identical_natively() {
         ]);
     }
 
-    let first = emeans_rgb(rgb.clone(), 8, Some(5), None).unwrap();
-    let second = emeans_rgb(rgb, 8, Some(5), None).unwrap();
+    let first = emeans_rgb(&rgb, 8, Some(5), None, None).unwrap();
+    let second = emeans_rgb(&rgb, 8, Some(5), None, None).unwrap();
 
     assert_eq!(first, second);
+}
+
+#[test]
+fn explicit_seed_is_repeatable_and_distinct_seeds_can_differ() {
+    let mut rgb = Vec::new();
+    for index in 0..2000 {
+        rgb.extend_from_slice(&[
+            (index as u8).wrapping_mul(37),
+            (index as u8).wrapping_mul(11),
+            (index as u8).wrapping_mul(97),
+        ]);
+    }
+
+    let a = emeans_rgb(&rgb, 8, Some(5), None, Some(12345)).unwrap();
+    let b = emeans_rgb(&rgb, 8, Some(5), None, Some(12345)).unwrap();
+    let c = emeans_rgb(&rgb, 8, Some(5), None, Some(99999)).unwrap();
+
+    assert_eq!(a, b);
+    assert_ne!(a, c);
 }
 
 #[test]
@@ -110,7 +129,7 @@ fn a_single_colour_image_returns_that_colour() {
     for fill in [0u8, 64, 128, 255] {
         let rgb = vec![fill; 3 * 4096];
 
-        let palette = colours(&emeans_rgb(rgb, 16, Some(5), None).unwrap());
+        let palette = colours(&emeans_rgb(&rgb, 16, Some(5), None, None).unwrap());
 
         assert_eq!(palette.len(), 16);
         assert!(
@@ -123,11 +142,11 @@ fn a_single_colour_image_returns_that_colour() {
 #[test]
 fn an_empty_buffer_returns_an_empty_palette() {
     assert_eq!(
-        emeans_rgb(Vec::new(), 2, Some(5), None).unwrap(),
+        emeans_rgb(&[], 2, Some(5), None, None).unwrap(),
         Vec::<u8>::new()
     );
     assert_eq!(
-        emeans_rgba(Vec::new(), 2, Some(5), None).unwrap(),
+        emeans_rgba(&[], 2, Some(5), None, None).unwrap(),
         Vec::<u8>::new()
     );
 }
@@ -155,7 +174,7 @@ fn finds_separated_groups() {
     }
     let pixels = colours(&rgb);
 
-    let palette = colours(&emeans_rgb(rgb, groups.len(), Some(5), None).unwrap());
+    let palette = colours(&emeans_rgb(&rgb, groups.len(), Some(5), None, None).unwrap());
 
     assert_eq!(palette.len(), groups.len());
     assert_eq!(
@@ -200,6 +219,10 @@ fn weighted_rows_match_expanded_points_in_one_batch() {
             batch_size: Some(1000),
             revival_threshold: Some(0.0),
             capture_assignments: false,
+            seed: None,
+            use_f32_assignment: false,
+            use_dot_product: false,
+            ..Default::default()
         },
     );
     let plain = emeans_dispatched(
@@ -213,6 +236,10 @@ fn weighted_rows_match_expanded_points_in_one_batch() {
             batch_size: Some(1000),
             revival_threshold: Some(0.0),
             capture_assignments: false,
+            seed: None,
+            use_f32_assignment: false,
+            use_dot_product: false,
+            ..Default::default()
         },
     );
 

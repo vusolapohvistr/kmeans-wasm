@@ -13,28 +13,27 @@
     },
     "packageManager": {
       "name": "npm",
-      "version": "12.1.0",
-      "onFail": "error"
+      "version": ">=10.0.0",
+      "onFail": "warn"
     }
   },
   "allowScripts": {},
   "scripts": {
-    "build": "wasm-pack build --release --target bundler && node scripts/finalize-npm-package.mjs pkg",
+    "build": "node -e \"import('node:fs').then(fs => fs.rmSync('pkg', { recursive: true, force: true }))\" && wasm-pack build --release --target web --out-dir pkg && node scripts/finalize-npm-package.mjs pkg",
     "bench:rgb": "npm --prefix js_bench run bench:rgb",
     "bench:kmeans": "npm --prefix js_bench run bench:kmeans",
     "bench:images": "npm --prefix js_bench run bench:images",
     "bench:emeans": "npm --prefix js_bench run bench:emeans",
-    "check": "npm run lint && npm test && npm run package:check && npm run test:page",
+    "check": "npm run lint && npm test && cargo check --locked --target wasm32-unknown-unknown --tests && npm run package:check && npm run pages:build && npm run test:page",
     "test:page": "node scripts/check-page.mjs",
     "lint": "cargo fmt --check && cargo clippy --locked --all-targets -- -D warnings",
-    "package:check": "npm run build && publint --strict pkg && attw --pack --profile esm-only pkg",
+    "package:check": "npm run build && publint --strict pkg && attw --pack --profile esm-only pkg && node scripts/test-package.mjs",
     "pages:build": "wasm-pack build --release --target web --out-dir docs/wasm",
     "release": "release-it",
     "release:dry": "release-it --dry-run",
     "release:stage": "node scripts/stage-npm-release.mjs",
     "test": "cargo test --locked",
-    "test:web": "node scripts/run-web-tests.mjs",
-    "bench:images": "npm --prefix js_bench run bench:images"
+    "test:web": "node scripts/run-web-tests.mjs"
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "^0.18.5",

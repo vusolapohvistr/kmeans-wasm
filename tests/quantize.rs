@@ -4,7 +4,7 @@ use kmeans_wasm::{kmeans_rgb, kmeans_rgba};
 fn quantizes_rgb_values() {
     let rgb = vec![255, 0, 0, 0, 255, 0, 0, 0, 255];
 
-    let centroids = kmeans_rgb(rgb, 3, 100, Some(0.001)).unwrap();
+    let centroids = kmeans_rgb(&rgb, 3, 100, Some(0.001), None).unwrap();
 
     assert_eq!(centroids.len(), 9);
 }
@@ -18,7 +18,7 @@ fn quantizes_rgba_values() {
         255, 255, 255, 0,
     ];
 
-    let centroids = kmeans_rgba(rgba, 4, 100, Some(0.001)).unwrap();
+    let centroids = kmeans_rgba(&rgba, 4, 100, Some(0.001), None).unwrap();
 
     assert_eq!(centroids.len(), 16);
 }
@@ -30,7 +30,7 @@ fn clusters_the_alpha_channel() {
         rgba.extend_from_slice(&[index * 4, 128, 64, if index % 2 == 0 { 0 } else { 255 }]);
     }
 
-    let centroids = kmeans_rgba(rgba, 2, 100, Some(0.001)).unwrap();
+    let centroids = kmeans_rgba(&rgba, 2, 100, Some(0.001), None).unwrap();
 
     let alphas = centroids
         .as_chunks::<4>()
@@ -55,7 +55,7 @@ fn a_solid_colour_image_returns_no_spurious_black_entries() {
     for fill in [0u8, 64, 128, 255] {
         let rgb = vec![fill; 3 * 4096];
 
-        let centroids = kmeans_rgb(rgb, 16, 100, Some(0.001)).unwrap();
+        let centroids = kmeans_rgb(&rgb, 16, 100, Some(0.001), None).unwrap();
 
         assert_eq!(centroids.len(), 48);
         assert!(
@@ -79,7 +79,7 @@ fn repeated_pixel_values_return_no_spurious_black_entries() {
         rgb.extend_from_slice(&[(pick * 6) as u8, (pick * 3) as u8, (255 - pick * 6) as u8]);
     }
 
-    let centroids = kmeans_rgb(rgb, 16, 100, Some(0.001)).unwrap();
+    let centroids = kmeans_rgb(&rgb, 16, 100, Some(0.001), None).unwrap();
 
     let blacks = centroids
         .as_chunks::<3>()
@@ -109,8 +109,8 @@ fn the_default_threshold_stops_flat_input_early() {
         ]);
     }
 
-    let early = kmeans_rgb(rgb.clone(), 8, 100, None).unwrap();
-    let full = kmeans_rgb(rgb, 8, 100, Some(0.0)).unwrap();
+    let early = kmeans_rgb(&rgb, 8, 100, None, None).unwrap();
+    let full = kmeans_rgb(&rgb, 8, 100, Some(0.0), None).unwrap();
 
     assert_eq!(
         early, full,
@@ -172,7 +172,7 @@ fn every_palette_entry_is_reachable() {
     let input = colours(&rgb);
 
     for k in 2..=groups.len() {
-        let palette = colours(&kmeans_rgb(rgb.clone(), k, 100, Some(0.1)).unwrap());
+        let palette = colours(&kmeans_rgb(&rgb, k, 100, Some(0.1), None).unwrap());
 
         let mut mapped: Vec<[u8; 3]> = input.iter().map(|pixel| nearest(&palette, pixel)).collect();
         mapped.sort_unstable();
@@ -203,7 +203,7 @@ fn a_palette_the_size_of_the_colour_count_reproduces_the_input() {
     }
     let input = colours(&rgb);
 
-    let palette = colours(&kmeans_rgb(rgb, groups.len(), 100, Some(0.1)).unwrap());
+    let palette = colours(&kmeans_rgb(&rgb, groups.len(), 100, Some(0.1), None).unwrap());
     assert_eq!(palette.len(), groups.len());
 
     for pixel in &input {
@@ -237,7 +237,7 @@ fn a_palette_at_or_below_the_colour_count_is_all_distinct_colours() {
     }
 
     for k in 2..=groups.len() {
-        let mut palette = colours(&kmeans_rgb(rgb.clone(), k, 100, Some(0.1)).unwrap());
+        let mut palette = colours(&kmeans_rgb(&rgb, k, 100, Some(0.1), None).unwrap());
         let total = palette.len();
         palette.sort_unstable();
         palette.dedup();
@@ -264,7 +264,7 @@ mod distinct_colours {
     /// native targets, so those cases live in `tests/web.rs` instead.
     #[test]
     fn a_single_pixel() {
-        let one = kmeans_rgb(vec![10, 20, 30], 2, 100, Some(0.1)).unwrap();
+        let one = kmeans_rgb(&[10, 20, 30], 2, 100, Some(0.1), None).unwrap();
         assert_eq!(one.len(), 6);
         assert!(one.iter().all(|value| matches!(*value, 10 | 20 | 30)));
     }
@@ -274,7 +274,7 @@ mod distinct_colours {
     #[test]
     fn more_clusters_than_pixels() {
         let rgb = vec![10, 20, 30, 200, 100, 50];
-        let palette = colours(&kmeans_rgb(rgb.clone(), 8, 100, Some(0.1)).unwrap());
+        let palette = colours(&kmeans_rgb(&rgb, 8, 100, Some(0.1), None).unwrap());
         assert_eq!(palette.len(), 8);
 
         let input = colours(&rgb);
@@ -289,7 +289,7 @@ mod distinct_colours {
     fn one_colour_with_more_clusters_requested() {
         for fill in [0u8, 7, 128, 255] {
             let rgb = vec![fill; 3 * 2048];
-            let palette = kmeans_rgb(rgb, 16, 100, Some(0.1)).unwrap();
+            let palette = kmeans_rgb(&rgb, 16, 100, Some(0.1), None).unwrap();
             assert_eq!(palette.len(), 48);
             assert!(
                 palette.iter().all(|value| *value == fill),
@@ -310,7 +310,7 @@ mod distinct_colours {
             rgba.extend_from_slice(&[10, 20, 30, 255]);
         }
 
-        let palette = kmeans_rgba(rgba, 2, 100, Some(0.1)).unwrap();
+        let palette = kmeans_rgba(&rgba, 2, 100, Some(0.1), None).unwrap();
         let entries: Vec<[u8; 4]> = palette.as_chunks::<4>().0.to_vec();
         assert_eq!(entries.len(), 2);
 
@@ -334,7 +334,7 @@ mod distinct_colours {
             rgb.extend_from_slice(&[255, 255, 255]);
         }
 
-        let palette = colours(&kmeans_rgb(rgb.clone(), 2, 100, Some(0.1)).unwrap());
+        let palette = colours(&kmeans_rgb(&rgb, 2, 100, Some(0.1), None).unwrap());
         assert_eq!(palette.len(), 2);
         assert!(palette.contains(&[0, 0, 0]), "black must be present");
         assert!(palette.contains(&[255, 255, 255]), "white must be present");
@@ -356,7 +356,7 @@ mod distinct_colours {
         }
 
         let input = colours(&rgb);
-        let palette = colours(&kmeans_rgb(rgb, 2, 100, Some(0.1)).unwrap());
+        let palette = colours(&kmeans_rgb(&rgb, 2, 100, Some(0.1), None).unwrap());
         let mut mapped: Vec<[u8; 3]> = input.iter().map(|pixel| nearest(&palette, pixel)).collect();
         mapped.sort_unstable();
         mapped.dedup();

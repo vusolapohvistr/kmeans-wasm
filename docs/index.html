@@ -5,9 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta
       name="description"
-      content="A small RGB and RGBA color-quantization comparison for kmeans-wasm, e-means, and skmeans."
+      content="Interactive RGB and RGBA color-quantization playground and benchmark for kmeans-wasm, e-means, and skmeans."
     />
-    <title>kmeans-wasm · RGB, RGBA, and e-means comparison</title>
+    <title>kmeans-wasm · RGB, RGBA, and e-means playground</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
@@ -16,22 +16,44 @@
         <p class="eyebrow">kmeans-wasm · RGB and RGBA color quantization</p>
         <h1>One image, four implementations.</h1>
         <p class="intro">
-          The same public-domain image and 16-color palette, clustered in the browser with the packed
-          <code>kmeans_rgb</code> method, the four-component <code>kmeans_rgba</code> method, the
-          fixed-pass <code>emeans_rgb</code> method, and with <code>skmeans</code>.
+          Drop any image below (or test on NASA Blue Marble) to quantize colors locally in WebAssembly
+          with <code>kmeans_rgb</code>, <code>kmeans_rgba</code>, fixed-pass <code>emeans_rgb</code>,
+          and pure-JS <code>skmeans</code>.
         </p>
         <a class="github-link" href="https://github.com/vusolapohvistr/kmeans-wasm" rel="noreferrer">GitHub ↗</a>
       </header>
 
-      <section class="comparison" aria-labelledby="comparison-title">
+      <section class="comparison" id="comparison-panel" aria-labelledby="comparison-title">
         <div class="section-heading">
           <h2 id="comparison-title">NASA / Apollo 17 · Blue Marble</h2>
           <p id="status" role="status" aria-live="polite">Loading WebAssembly…</p>
         </div>
 
+        <div class="controls">
+          <label class="file-picker">
+            <span>Upload image</span>
+            <input id="image-input" type="file" accept="image/*" />
+          </label>
+          <label class="control">
+            <span>Colors</span>
+            <select id="palette-size">
+              <option value="4">4</option>
+              <option value="8">8</option>
+              <option value="16" selected>16</option>
+              <option value="32">32</option>
+              <option value="64">64</option>
+            </select>
+          </label>
+          <label class="control checkbox">
+            <input id="dither-toggle" type="checkbox" />
+            <span>Floyd–Steinberg dither</span>
+          </label>
+          <button id="download-btn" type="button">Download PNG</button>
+        </div>
+
         <div class="image-grid">
           <figure class="image-card">
-            <canvas id="source-canvas" aria-label="Original Blue Marble image"></canvas>
+            <canvas id="source-canvas" aria-label="Original image"></canvas>
             <figcaption>Original</figcaption>
           </figure>
           <figure class="image-card">
@@ -50,6 +72,11 @@
             <canvas id="skmeans-canvas" aria-label="Image clustered with skmeans"></canvas>
             <figcaption><code>skmeans</code> · <span id="skmeans-time">—</span></figcaption>
           </figure>
+        </div>
+
+        <div class="palette-bar" aria-label="Extracted palette">
+          <span class="palette-label">Palette <small>(click to copy hex)</small></span>
+          <div id="palette-swatches" class="palette-swatches"></div>
         </div>
 
         <div class="timing" aria-labelledby="timing-title">
@@ -99,17 +126,15 @@
           <p class="timing-note" id="timing-note">
             Clustering, median of three runs after one warm-up, identical initialization.
             <code>kmeans_rgba</code> measures four components per pixel, so it also pays for the
-            alpha channel even though this JPEG is fully opaque. <code>emeans_rgb</code> uses five
-            passes instead of an iteration cap. <code>apply_palette</code> is the other half of
-            quantization: it replaces every pixel with its nearest palette entry, so it is a cost on
-            top of <code>kmeans_rgb</code> rather than a comparison with it, and its last column says
-            how much.
+            alpha channel even though JPEGs are fully opaque. <code>emeans_rgb</code> uses five
+            passes instead of an iteration cap. <code>apply_palette</code> (or
+            <code>apply_palette_dithered</code>) is the mapping step on top of clustering.
           </p>
         </div>
 
         <div class="details">
           <span><strong>Source</strong><span id="source-size">—</span></span>
-          <span><strong>Palette</strong> 16 colors</span>
+          <span><strong>Palette</strong> <span id="palette-count">16 colors</span></span>
           <span><strong>Iterations</strong> ≤ 30 or 5 passes</span>
           <span><strong>Mapping</strong> <span id="map-time">—</span></span>
           <span><strong>Processing</strong> local browser only</span>

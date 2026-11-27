@@ -90,6 +90,89 @@ footer a:hover {
   border: 1px solid var(--line);
   border-radius: 18px;
   background: rgb(21 27 40 / 80%);
+  transition: border-color 120ms ease;
+}
+
+.comparison.drag-over {
+  border-color: var(--accent);
+}
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+  margin-bottom: 18px;
+}
+
+.file-picker,
+.control select,
+#download-btn {
+  padding: 7px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #0d121d;
+  color: var(--text);
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.file-picker input {
+  display: none;
+}
+
+.file-picker:hover,
+#download-btn:hover {
+  border-color: var(--accent);
+}
+
+.control {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.control.checkbox {
+  cursor: pointer;
+}
+
+.palette-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  margin-top: 16px;
+}
+
+.palette-label {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.palette-label small {
+  opacity: 0.75;
+}
+
+.palette-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.swatch {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid rgb(255 255 255 / 20%);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.swatch:hover {
+  transform: translateY(-1px);
+  border-color: var(--text);
 }
 
 .section-heading {

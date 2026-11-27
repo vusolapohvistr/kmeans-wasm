@@ -86,6 +86,12 @@ class FakeClassList {
   constructor() {
     this.tokens = new Set();
   }
+  add(token) {
+    this.tokens.add(token);
+  }
+  remove(token) {
+    this.tokens.delete(token);
+  }
   toggle(token, force) {
     if (force) this.tokens.add(token);
     else this.tokens.delete(token);
@@ -100,8 +106,12 @@ class FakeElement {
     this.tagName = tagName.toUpperCase();
     this.children = [];
     this.classList = new FakeClassList();
+    this.style = {};
+    this.value = "";
+    this.checked = false;
     this._text = "";
   }
+  addEventListener() {}
   get textContent() {
     return this.children.length ? this.children.map((c) => c.textContent).join("") : this._text;
   }
@@ -120,6 +130,14 @@ class FakeElement {
 const elements = new Map();
 const canvases = new Map();
 const ids = [
+  "comparison-panel",
+  "comparison-title",
+  "image-input",
+  "palette-size",
+  "dither-toggle",
+  "download-btn",
+  "palette-swatches",
+  "palette-count",
   "source-canvas",
   "rgb-canvas",
   "rgba-canvas",
@@ -138,10 +156,13 @@ const ids = [
 for (const id of ids) {
   if (id.endsWith("-canvas")) {
     const canvas = new FakeCanvas(id);
+    canvas.addEventListener = () => {};
     canvases.set(id, canvas);
     elements.set(id, canvas);
   } else {
-    elements.set(id, new FakeElement("div"));
+    const element = new FakeElement("div");
+    if (id === "palette-size") element.value = String(PALETTE_SIZE);
+    elements.set(id, element);
   }
 }
 
@@ -294,6 +315,10 @@ const mapping = rows.find((row) => row[0] === "apply_palette");
 check(
   mapping !== undefined && mapping[3].includes("on top"),
   `the apply_palette row should report a cost rather than a ratio, got ${JSON.stringify(mapping)}`,
+);
+check(
+  elements.get("palette-swatches").children.length === PALETTE_SIZE,
+  `expected ${PALETTE_SIZE} palette swatches, got ${elements.get("palette-swatches").children.length}`,
 );
 
 if (failures.length > 0) {

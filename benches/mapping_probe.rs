@@ -151,7 +151,7 @@ fn main() {
         let mut table_output = Vec::new();
         for _ in 0..repeats {
             let started = Instant::now();
-            table_output = apply_palette(input.clone(), palette.clone(), COMPONENTS).unwrap();
+            table_output = apply_palette(&input, &palette, COMPONENTS).unwrap();
             table_times.push(started.elapsed().as_secs_f64() * 1000.0);
         }
         let table_ms = median(table_times);

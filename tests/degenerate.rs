@@ -2,10 +2,6 @@
 // colour, and a palette that should be all zeros rather than all black-by-NaN.
 use kmeans_wasm::kmeans_rgb;
 
-fn rgb(values: &[u8]) -> Vec<u8> {
-    values.to_vec()
-}
-
 #[test]
 fn k_larger_than_the_distinct_count() {
     for (pixels, distinct, k) in [
@@ -14,7 +10,7 @@ fn k_larger_than_the_distinct_count() {
         (vec![10, 20, 30, 10, 20, 30, 40, 50, 60], 3, 16),
         (vec![0u8, 0, 0, 255, 255, 255], 2, 32),
     ] {
-        let palette = kmeans_rgb(rgb(&pixels), k, 100, Some(0.1)).unwrap();
+        let palette = kmeans_rgb(&pixels, k, 100, Some(0.1), None).unwrap();
         assert_eq!(palette.len(), k * 3, "k={k} distinct={distinct}");
         // Every centroid must be a real u8, which it is by construction, and the
         // palette must be drawn from the input's own colours.
@@ -46,7 +42,7 @@ fn every_centroid_is_reachable_from_some_pixel() {
         rows.iter().map(|row| [row[0], row[1], row[2]]).collect();
     let distinct = distinct.len();
     for k in [distinct + 1, distinct * 2, 64] {
-        let palette = kmeans_rgb(pixels.clone(), k, 100, Some(0.1)).unwrap();
+        let palette = kmeans_rgb(&pixels, k, 100, Some(0.1), None).unwrap();
         let (centroids, _) = palette.as_chunks::<3>();
         let reachable = centroids.iter().filter(|c| rows.contains(c)).count();
         assert!(
@@ -59,7 +55,7 @@ fn every_centroid_is_reachable_from_some_pixel() {
 
 #[test]
 fn a_single_colour_input_gives_that_colour() {
-    let palette = kmeans_rgb(vec![10, 20, 30], 2, 100, Some(0.1)).unwrap();
+    let palette = kmeans_rgb(&[10, 20, 30], 2, 100, Some(0.1), None).unwrap();
     assert_eq!(palette.len(), 6);
     let (centroids, _) = palette.as_chunks::<3>();
     for centroid in centroids {
